@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """新闻热点 - 桌面版"""
 import os
 
@@ -97,7 +97,7 @@ class MonitorWorker(QThread):
                 if sym in ('MARKET', 'BTC.D'):
                     continue
                 # Status update every 5 coins to reduce GUI load
-                if (sym_idx + 1) % 5 == 0 or sym_idx == 0:
+                if (sym_idx + 1) % 10 == 0 or sym_idx == 0:
                     self.status_update.emit(f'正在分析 {sym} 深度数据... ({sym_idx+1}/{len(signals[:15])})')
                 try:
                     ratio, ob_label = collector.get_orderbook_ratio(sym)
@@ -966,6 +966,7 @@ class MainWindow(QMainWindow):
         self.worker = None
         self.news_worker = None
         self.scheduler = None
+        self._log_buffer = []
         self._update_url = None
         self._update_version = None
         self._build_ui()
@@ -1032,6 +1033,11 @@ class MainWindow(QMainWindow):
         self._weight_timer = QTimer()
         self._weight_timer.timeout.connect(self._update_weight_display)
         self._weight_timer.start(5000)  # every 5 seconds
+
+        # Log flush timer (reduces GUI repaints)
+        self._log_timer = QTimer()
+        self._log_timer.timeout.connect(self._flush_log)
+        self._log_timer.start(500)  # flush every 500ms
         # Startup rate limit check
         try:
             import collector
@@ -1095,18 +1101,8 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def _on_signals(self, signals):
-        for s in signals[:8]:
-            typ = s.get('type','')
-            if typ == 'market_overview':
-                continue
-            coin = s.get('coin','')
-            detail = s.get('detail','')
-            pct = s.get('change_pct', 0)
-            emoji = '🟢' if pct > 0 else '🔴'
-            oi_label = s.get('oi_label', '')
-            oi_str = f' [{oi_label}]' if oi_label else ''
-            self._log(f'{emoji} {coin}: {detail}{oi_str}')
-
+        # Log only shows status; coin details go to Feishu only
+        pass
     def _on_status(self, text):
         self.status_lbl.setText(text)
         self._log(text)
@@ -1154,7 +1150,12 @@ class MainWindow(QMainWindow):
     def _on_update_clicked(self):
         if not self._update_url:
             return
-        self.update_lbl.setText('????...')
+        reply = QMessageBox.question(self, '确认更新',
+            f'发现新版本 v{self._update_version}，是否立即更新？',
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if reply != QMessageBox.Yes:
+            return
+        self.update_lbl.setText('正在更新...')
         self.update_lbl.setStyleSheet('color:#fff;background:#f39c12;border-radius:3px;padding:2px 8px;font-size:11px;font-weight:bold')
         self.update_lbl.setEnabled(False)
         import updater
@@ -1162,14 +1163,14 @@ class MainWindow(QMainWindow):
             pass
         ok, err = updater.download_and_replace(self._update_url, _cb)
         if ok:
-            self.update_lbl.setText('????,???')
+            self.update_lbl.setText('更新完成,请重启')
             self.update_lbl.setStyleSheet('color:#fff;background:#27ae60;border-radius:3px;padding:2px 8px;font-size:11px;font-weight:bold')
-            self._log(f'=== ??? v{self._update_version}???????? ===')
+            QMessageBox.information(self, '更新完成', '新版本已下载，请手动重启软件。')
+            self._log(f'=== 已下载 v{self._update_version}，请手动重启软件 ===')
         else:
-            self.update_lbl.setText('????')
+            self.update_lbl.setText('更新失败')
             self.update_lbl.setStyleSheet('color:#fff;background:#e74c3c;border-radius:3px;padding:2px 8px;font-size:11px;font-weight:bold')
-            self._log(f'????: {err}')
-
+            self._log(f'更新失败: {err}')
     def _fetch_news(self):
         self._log('正在拉取新闻热点...')
         self.news_worker = NewsWorker()
@@ -1255,14 +1256,21 @@ class MainWindow(QMainWindow):
             pass
 
     def _log(self, text):
-        self.log_area.append(text)
-        # Auto scroll to bottom
-        sb = self.log_area.verticalScrollBar()
-        sb.setValue(sb.maximum())
-        # Auto-scroll to bottom
-        sb = self.log_area.verticalScrollBar()
-        sb.setValue(sb.maximum())
+        self._log_buffer.append(text)
+        # Keep only last 200 lines to avoid memory issues
+        if len(self._log_buffer) > 200:
+            self._log_buffer = self._log_buffer[-200:]
 
+    def _flush_log(self):
+        if not self._log_buffer:
+            return
+        # Only update if text changed to reduce repaints
+        current = self.log_area.toPlainText()
+        new_text = chr(10).join(self._log_buffer)
+        if current != new_text:
+            self.log_area.setPlainText(new_text)
+            sb = self.log_area.verticalScrollBar()
+            sb.setValue(sb.maximum())
     def closeEvent(self, event):
         if self.scheduler:
             self.scheduler.shutdown(wait=False)
@@ -1298,9 +1306,9 @@ if __name__ == '__main__':
             if has:
                 w._update_url = url
                 w._update_version = latest
-                w.update_lbl.setText(f'?? ?? v{latest}')
+                w.update_lbl.setText(f'🔄 更新 v{latest}')
                 w.update_lbl.setVisible(True)
-                w.setWindowTitle(f'???? [?? v{latest}]')
+                w.setWindowTitle(f'新闻热点 [新版 v{latest}]')
         QTimer.singleShot(3000, _check)
     except:
         pass
