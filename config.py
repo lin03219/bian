@@ -1,0 +1,47 @@
+# -*- coding: utf-8 -*-
+"""
+配置管理模块：Webhook、监控参数、币种列表
+"""
+import json
+import os
+from pathlib import Path
+
+CONFIG_DIR = Path(os.path.expanduser('~')) / '.crypto_monitor'
+CONFIG_FILE = CONFIG_DIR / 'config.json'
+
+DEFAULT_CONFIG = {
+    'channel': 'dingtalk',
+    'webhook_url': '',
+    'checks_per_minute': 4,
+    'price_change_threshold_pct': 3.5,
+    'volume_change_threshold_pct': 100.0,
+    'watch_coins': [],
+    'watch_unlocks': True,
+    'unlock_ahead_hours': 48,
+    'auto_start': True,
+    'proxy': 'http://127.0.0.1:7890',
+    'dingtalk_secret': '',
+    'push_interval_seconds': 30,
+    'blacklist': [],
+    'santiment_key': '',
+    'news_interval_minutes': 10,
+    'feishu_secret': '',
+}
+
+def load_config():
+    if CONFIG_FILE.exists():
+        with open(CONFIG_FILE, 'r', encoding='utf-8-sig') as f:
+            cfg = json.load(f)
+            for k, v in DEFAULT_CONFIG.items():
+                if k not in cfg:
+                    cfg[k] = v
+            return cfg
+    return dict(DEFAULT_CONFIG)
+
+def save_config(cfg):
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+def get_config():
+    return load_config()
