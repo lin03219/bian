@@ -554,6 +554,25 @@ def get_premium_index(symbol):
     except:
         return None
 
+def get_arb_metrics(symbol, spot_price=0):
+    """????: ?? (mark_price, spot_vs_mark_premium, funding_rate)"""
+    try:
+        resp = requests.get(
+            "https://fapi.binance.com/fapi/v1/premiumIndex",
+            params={"symbol": symbol + "USDT"},
+            timeout=5, proxies=_get_proxy()
+        )
+        data = resp.json()
+        mark = float(data.get("markPrice", 0))
+        fr = float(data.get("lastFundingRate", 0)) * 100
+        if mark > 0 and spot_price > 0:
+            premium = (spot_price / mark - 1) * 100  # + = ????????????
+        else:
+            premium = 0
+        _track_weight(1)
+        return mark, premium, fr
+    except:
+        return 0, 0, 0
 def get_kline_volumes(symbol, interval="1h", limit=100):
     """获取K线成交量列表"""
     kls = _get_binance("/klines", {"symbol": symbol + "USDT", "interval": interval, "limit": str(limit)})

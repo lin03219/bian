@@ -124,6 +124,10 @@ class MonitorWorker(QThread):
                 try:
                     s['premium'] = collector.get_premium_index(sym)
                     s['funding_rate'] = collector.get_funding_rate(sym)
+                    spot_p = s.get('price', 0)
+                    mark_p, spot_prem, fr2 = collector.get_arb_metrics(sym, spot_p)
+                    s['mark_price'] = mark_p
+                    s['spot_premium'] = spot_prem
                 except:
                     pass
                 # Active buy/sell (1wgt)
@@ -198,6 +202,10 @@ class MonitorWorker(QThread):
                         self.status_update.emit('推送完成')
                     else:
                         self.status_update.emit(f'推送失败: {msg}')
+                    # 套利扫描（独立飞书群）
+                    arb_list = [s for s in signals[:15] if s.get("spot_premium", 0) >= 0.15]
+                    if arb_list:
+                        self.notifier.send_arb_batch(arb_list)
             now = datetime.now().strftime('%H:%M:%S')
             msg = f'{now}  检测到 {len(signals)} 条信号' if signals else f'{now}  监控正常，暂无异常信号'
             self.status_update.emit(msg)
