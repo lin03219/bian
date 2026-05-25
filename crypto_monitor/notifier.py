@@ -299,20 +299,11 @@ class Notifier:
             reasons_bear = sig.get('reasons_bear', [])
             reasons_neutral = sig.get('reasons_neutral', [])
             entry_lines = []
-            entry_lines.append('---')
-            entry_lines.append('{} \u8bc4\u5206 {:+.0f}'.format(verdict, score))
-            entry_lines.append('\U0001f4a1 ' + suggestion)
-            entry_lines.append('**{}**  1h:{}  4h:{}'.format(coin, _fc(c1), _fc(c4)))
-            if amp > 0:
-                entry_lines.append('4h\u632f\u5e45{:.0f}%'.format(amp))
-            for r in reasons_bull[:3]:
-                entry_lines.append('\u2705 ' + r)
-            for r in reasons_bear[:3]:
-                entry_lines.append('\u274c ' + r)
-            for r in reasons_neutral[:2]:
-                entry_lines.append('\u2796 ' + r)
+            # 只显示：币名 + 1h/4h + 评分
+            score_str = f'评分{score:+d}' if score != 0 else '评分0'
+            entry_lines.append('**{}**  1h:{}  4h:{}  {}'.format(coin, _fc(c1), _fc(c4), score_str))
             entry = chr(10).join(entry_lines)
-            # detailed analysis with verdict/score/reasons
+
 
             if pct > 2:
                 bullish_items.append((amp, entry))

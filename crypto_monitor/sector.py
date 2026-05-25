@@ -138,7 +138,7 @@ def analyze_sectors(coins):
             print(f'[SECTOR] {sec}: {len(enhanced)} laggards scored, top: {enhanced[0][0]} Q={enhanced[0][3]}')
     results = []
     for sec, data in sector_data.items():
-        if data['count'] < 2 or abs(data['total_pct'] / data['count']) < 3:
+        if data['count'] < 2 or data['total_pct'] / data['count'] < 2.5:
             continue
         avg = data['total_pct'] / data['count']
         name = SECTOR_NAMES.get(sec, sec)
