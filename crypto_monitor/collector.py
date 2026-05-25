@@ -269,6 +269,60 @@ def get_orderbook_deep(symbol):
         return ratio, label, cum_imbalance, wall_score
     except:
         return 1.0, '-', 1.0, 0
+def get_orderbook_100(symbol):
+    """100?????: ?? ratio, label, cum_imbalance, wall_score (9 wgt)"""
+    try:
+        data = _get_binance('/depth', {'symbol': symbol + 'USDT', 'limit': '100'})
+        _track_weight(4)  # Extra 4 for 100-level (total 9 = 5 base + 4)
+        bids_raw = [(float(b[0]), float(b[1])) for b in data.get('bids', [])]
+        asks_raw = [(float(a[0]), float(a[1])) for a in data.get('asks', [])]
+        
+        bids_total = sum(qty for _, qty in bids_raw)
+        asks_total = sum(qty for _, qty in asks_raw)
+        if asks_total > 0:
+            ratio = round(bids_total / asks_total, 2)
+        else:
+            ratio = 1.0
+        
+        bid_walls = sorted([(p * q, p, q) for p, q in bids_raw], reverse=True)[:3]
+        ask_walls = sorted([(p * q, p, q) for p, q in asks_raw], reverse=True)[:3]
+        
+        mid = (bids_raw[0][0] + asks_raw[0][0]) / 2 if bids_raw and asks_raw else 0
+        if mid > 0:
+            bid_pressure = sum(qty * (1 - (mid - p) / mid * 2) for p, qty in bids_raw[:50] if p > mid * 0.9)
+            ask_pressure = sum(qty * (1 - (p - mid) / mid * 2) for p, qty in asks_raw[:50] if p < mid * 1.1)
+            cum_imbalance = round(bid_pressure / max(ask_pressure, 1), 2)
+        else:
+            cum_imbalance = 1.0
+        
+        max_bid_wall = bid_walls[0][0] if bid_walls else 0
+        max_ask_wall = ask_walls[0][0] if ask_walls else 0
+        if max_ask_wall > 0:
+            wall_ratio = max_bid_wall / max_ask_wall
+        else:
+            wall_ratio = 1.0
+        
+        wall_score = 0
+        if wall_ratio > 2.0:
+            wall_score = 2
+        elif wall_ratio > 1.5:
+            wall_score = 1
+        elif wall_ratio < 0.5:
+            wall_score = -2
+        elif wall_ratio < 0.7:
+            wall_score = -1
+        
+        if ratio >= 1.3:
+            label = '???'
+        elif ratio <= 0.7:
+            label = '???'
+        else:
+            label = '??'
+        
+        return ratio, label, cum_imbalance, wall_score
+    except:
+        return 1.0, '-', 1.0, 0
+
 def get_large_trades(symbol, min_notional=10000):
     """大单成交统计: 返回(买量,卖量,标签)"""
     try:
@@ -344,9 +398,16 @@ _market_caps_time = 0
 
 def get_funding_rate(symbol):
     """获取永续合约资金费率"""
+    _track_weight(1)
     try:
-        data = _get_binance('/fapi/v1/premiumIndex', {'symbol': symbol + 'USDT'})
-        return float(data.get('lastFundingRate', 0)) * 100
+        resp = requests.get(
+            'https://fapi.binance.com/fapi/v1/premiumIndex',
+            params={'symbol': symbol + 'USDT'},
+            timeout=5, proxies=_get_proxy()
+        )
+        if resp.status_code != 200:
+            return None
+        return float(resp.json().get('lastFundingRate', 0)) * 100
     except:
         return None
 
@@ -543,8 +604,16 @@ def get_active_buy_sell_ratio(symbol):
         return 0.5, '-', 0, 0
 
 def get_premium_index(symbol):
+    _track_weight(1)
     try:
-        data = _get_binance('/fapi/v1/premiumIndex', {'symbol': symbol + 'USDT'})
+        resp = requests.get(
+            'https://fapi.binance.com/fapi/v1/premiumIndex',
+            params={'symbol': symbol + 'USDT'},
+            timeout=5, proxies=_get_proxy()
+        )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
         idx = float(data.get('indexPrice', 0))
         mark = float(data.get('markPrice', 0))
         if idx > 0:

@@ -112,7 +112,7 @@ class MonitorWorker(QThread):
                         upper, mid, lower = collector.calc_bollinger(closes)
                         s['bb_upper'] = upper; s['bb_lower'] = lower
                     if len(closes) >= 2 and len(volumes) >= 2:
-                        s['obv'] = collector.calc_obv(closes, volumes)
+                        s['obv'], _ = collector.calc_obv(closes, volumes)
                     if len(closes) >= 15:
                         s['rsi_1h'] = collector.calc_rsi(closes)
                     mas = collector.calc_ma(closes)
@@ -122,14 +122,16 @@ class MonitorWorker(QThread):
                         s['ma_above'] = above; s['ma_total'] = len(mas)
                 except:
                     pass
-                # Contract premium + funding rate (1wgt total)
+                # Contract premium + funding rate (1 API call total)
                 try:
-                    s['premium'] = collector.get_premium_index(sym)
-                    s['funding_rate'] = collector.get_funding_rate(sym)
                     spot_p = s.get('spot_price') or 0
                     mark_p, spot_prem, fr2 = collector.get_arb_metrics(sym, spot_p)
                     s['mark_price'] = mark_p
                     s['spot_premium'] = spot_prem
+                    s['funding_rate'] = fr2
+                    # premium from get_premium_index separately (index-based)
+                    prem_idx = collector.get_premium_index(sym)
+                    s['premium'] = prem_idx
                 except:
                     pass
                 # Active buy/sell (1wgt)
@@ -154,7 +156,7 @@ class MonitorWorker(QThread):
                     pass
                 # Orderbook 500??? (25wgt) -- ??????
                 try:
-                    ratio, ob_label, cum_imb, wall_score = collector.get_orderbook_deep(sym)
+                    ratio, ob_label, cum_imb, wall_score = collector.get_orderbook_100(sym)
                     s['ob_ratio'] = ratio
                     s['ob_label'] = ob_label
                     s['cum_imbalance'] = cum_imb
@@ -204,30 +206,7 @@ class MonitorWorker(QThread):
                         self.status_update.emit('推送完成')
                     else:
                         self.status_update.emit(f'推送失败: {msg}')
-                    # ??????????, ??100??
-                    arb_list = []
-                    for c in coins[:100]:
-                        sym = c.get("symbol", "")
-                        spot_p = c.get("price", 0)
-                        if spot_p <= 0:
-                            continue
-                        try:
-                            mark_p, prem, fr = collector.get_arb_metrics(sym, spot_p)
-                            if 0.12 <= prem <= 30:
-                                arb_list.append({
-                                    "coin": sym,
-                                    "spot_price": spot_p,
-                                    "mark_price": mark_p,
-                                    "spot_premium": prem,
-                                    "funding_rate": fr,
-                                    "ob_label": "",
-                                    "wall_score": 0,
-                                    "oi_label": "",
-                                })
-                        except:
-                            pass
-                    if arb_list:
-                        self.notifier.send_arb_batch(arb_list)
+                    # ????: ????, ??????
             now = datetime.now().strftime('%H:%M:%S')
             msg = f'{now}  检测到 {len(signals)} 条信号' if signals else f'{now}  监控正常，暂无异常信号'
             self.status_update.emit(msg)
@@ -424,212 +403,282 @@ class SettingsDialog(QDialog):
 
 
 
-def _analyze_signal_detailed(sig):
-    """综合盘口、大单、BTC相关性、OI、涨跌幅给出分析总结，计算评分"""
-    pct = sig.get('change_pct', 0)
-    amp = sig.get('amplitude', 0)
-    c1 = sig.get('change_1h')
-    c4 = sig.get('change_4h')
-    ob = sig.get('ob_label', '')
-    lt = sig.get('lt_label', '')
-    corr = sig.get('btc_corr')
-    oi = sig.get('oi_label', '')
-    ls = sig.get('ls_label', '')
-    rsi = sig.get('rsi_1h')
-    change_24h = pct
-    
+def _compute_unified_score(d):
+    """统一评分函数，主页深度和单币分析共用
+    d dict 必须包含: change_24h, c1, c4, rsi, mas_dict, price, ob_label,
+        wall_score, cum_imbalance, lt_label, btc_corr, ls_label,
+        macd_val, macd_sig, macd_hist, amp, obv_val,
+        active_buy_ratio, premium, funding_rate, oi_chg_pct
+    """
+    change_24h = d.get("change_24h", 0) or 0
+    c1 = d.get("c1")
+    c4 = d.get("c4")
+    rsi = d.get("rsi")
+    mas_dict = d.get("mas_dict", {})
+    price = d.get("price", 0)
+    ob_label = d.get("ob_label", "")
+    wall_score = d.get("wall_score", 0) or 0
+    cum_imbalance = d.get("cum_imbalance", 1.0) or 1.0
+    lt_label = d.get("lt_label", "")
+    btc_corr = d.get("btc_corr")
+    ls_label = d.get("ls_label", "")
+    macd_val = d.get("macd_val")
+    macd_sig = d.get("macd_sig")
+    macd_hist = d.get("macd_hist")
+    amp = d.get("amp", 0) or 0
+    obv_val = d.get("obv_val")
+    if isinstance(obv_val, (tuple, list)):
+        obv_val = obv_val[0] if obv_val else None
+    active_buy_ratio = d.get("active_buy_ratio")
+    premium = d.get("premium")
+    funding_rate = d.get("funding_rate")
+    oi_chg_pct = d.get("oi_chg_pct")
+
     score = 0
     reasons_bull = []
     reasons_bear = []
     reasons_neutral = []
-    
-    # 24h change scoring
+
+    # 1. 24h change
     if change_24h > 15:
-        score += 3; reasons_bull.append(f'24h爆涨{change_24h:.1f}%，市场情绪极度亢奋，但追高风险也大')
-    elif change_24h > 5:
-        score += 2; reasons_bull.append(f'24h大涨{change_24h:.1f}%，资金明显流入，趋势强劲')
-    elif change_24h > 2:
-        score += 1; reasons_bull.append(f'24h涨{change_24h:.1f}%，走势稳健偏多')
+        score += 3; reasons_bull.append(f"24h爆涨{change_24h:.1f}%，市场情绪极度亢奋，但追高风险也大")
+    elif change_24h > 8:
+        score += 2; reasons_bull.append(f"24h大涨{change_24h:.1f}%，资金明显流入，趋势强劲")
+    elif change_24h > 3:
+        score += 1; reasons_bull.append(f"24h涨{change_24h:.1f}%，走势稳健偏多")
     elif change_24h < -15:
-        score -= 3; reasons_bear.append(f'24h暴跌{abs(change_24h):.1f}%，市场极度恐慌')
-    elif change_24h < -5:
-        score -= 2; reasons_bear.append(f'24h大跌{abs(change_24h):.1f}%，抛压明显')
-    elif change_24h < -2:
-        score -= 1; reasons_bear.append(f'24h跌{abs(change_24h):.1f}%，走势偏弱')
-    
-    # 1h/4h trend
+        score -= 3; reasons_bear.append(f"24h爆跌{abs(change_24h):.1f}%，市场极度恐慌")
+    elif change_24h < -8:
+        score -= 2; reasons_bear.append(f"24h大跌{abs(change_24h):.1f}%，抛压明显")
+    elif change_24h < -3:
+        score -= 1; reasons_bear.append(f"24h跌{abs(change_24h):.1f}%，走势偏弱")
+
+    # 2. 1h/4h trend
     if c1 is not None and c4 is not None:
-        if c1 > 0 and c4 > 0:
-            if c1 > 3 and c4 > 3:
-                score += 2; reasons_bull.append(f'1h涨{c1:.1f}%、4h涨{c4:.1f}%，短中期同步拉升')
-            else:
-                score += 1; reasons_bull.append(f'短中期均上涨(1h{c1:+.1f}%/4h{c4:+.1f}%)')
+        if c1 > 3 and c4 > 5:
+            score += 2; reasons_bull.append(f"1h涨{c1:.1f}%、4h涨{c4:.1f}%，短中期同步拉升")
+        elif c1 > 0 and c4 > 0:
+            score += 1; reasons_bull.append(f"短中期均上涨(1h{c1:+.1f}%/4h{c4:+.1f}%)")
+        elif c1 < -3 and c4 < -5:
+            score -= 2; reasons_bear.append(f"1h跌{abs(c1):.1f}%、4h跌{abs(c4):.1f}%，加速下跌中")
         elif c1 < 0 and c4 < 0:
-            if c1 < -3 and c4 < -3:
-                score -= 2; reasons_bear.append(f'1h跌{abs(c1):.1f}%、4h跌{abs(c4):.1f}%，加速下跌中')
-            else:
-                score -= 1; reasons_bear.append('短中期均下跌，空头主导')
+            score -= 1; reasons_bear.append("短中期均下跌，空头主导")
+        elif c1 > 0 and c4 < 0:
+            reasons_neutral.append("1h涨但4h跌，短期反弹但中期趋势不乐观")
         elif c1 < 0 and c4 > 0:
-            reasons_neutral.append(f'1h回调但4h仍涨，可能是健康的回踩')
-    
-    # RSI
+            reasons_neutral.append("1h回调但4h仍涨，可能是健康的回踩")
+
+    # 3. RSI
     if rsi is not None:
-        if rsi > 75:
-            score -= 2; reasons_bear.append(f'RSI高达{rsi:.0f}，极度超买，随时可能大幅回调')
-        elif rsi > 65:
-            score -= 1; reasons_bear.append(f'RSI={rsi:.0f}进入超买区')
-        elif rsi < 25:
-            score += 2; reasons_bull.append(f'RSI仅{rsi:.0f}，深度超卖，反弹概率很高')
-        elif rsi < 35:
-            score += 1; reasons_bull.append(f'RSI={rsi:.0f}偏低，超卖区域')
+        if rsi > 85:
+            score -= 2; reasons_bear.append(f"RSI高达{rsi:.0f}，极度超买，随时可能大幅回调")
+        elif rsi > 70:
+            score -= 1; reasons_bear.append(f"RSI={rsi:.0f}进入超买区")
+        elif rsi < 20:
+            score += 2; reasons_bull.append(f"RSI仅{rsi:.0f}，深度超卖，反弹概率很高")
+        elif rsi < 30:
+            score += 1; reasons_bull.append(f"RSI={rsi:.0f}偏低，超卖区域")
         else:
-            reasons_neutral.append(f'RSI={rsi:.0f}中性，无极端信号')
-    
-    # Orderbook
-    if ob:
-        if ob == '买盘强':
-            score += 1; reasons_bull.append('盘口买盘明显强于卖盘，下方有支撑')
-        elif ob == '卖盘强':
-            score -= 1; reasons_bear.append('盘口卖盘压制，上方有阻力')
+            reasons_neutral.append(f"RSI={rsi:.0f}中性，无极端信号")
+
+    # 4. MA
+    if mas_dict and price > 0:
+        above_ma = sum(1 for v in mas_dict.values() if price > v)
+        total_ma = len(mas_dict)
+        if above_ma == total_ma:
+            score += 2; reasons_bull.append(f"全部{total_ma}均线上方")
+        elif above_ma > total_ma // 2:
+            score += 1; reasons_bull.append(f"多数均线上({above_ma}/{total_ma})")
+        elif above_ma == 0:
+            score -= 2; reasons_bear.append(f"全部{total_ma}均线下")
         else:
-            reasons_neutral.append('盘口买卖均衡')
-    # 挂单墙分析 (500档)
-    ws = sig.get('wall_score', 0)
-    if ws == 2:
-        score += 2; reasons_bull.append('买盘挂单墙远厚于卖盘，强力支撑')
-    elif ws == 1:
-        score += 1; reasons_bull.append('买盘挂单墙略厚，偏多')
-    elif ws == -2:
-        score -= 2; reasons_bear.append('卖盘挂单墙远厚于买盘，强力压制')
-    elif ws == -1:
-        score -= 1; reasons_bear.append('卖盘挂单墙略厚，偏空')
-    ci = sig.get('cum_imbalance', 1.0)
-    if ci > 1.5:
-        score += 1; reasons_bull.append(f'近端买卖失衡比{ci:.1f}，买盘活跃')
-    
-    # Large trades
-    if lt:
-        if lt == '大单净买':
-            score += 1; reasons_bull.append('大单净买入，大户在吸筹')
-        elif lt == '大单净卖':
-            score -= 1; reasons_bear.append('大单净卖出，大户在出货')
-    
-    # BTC correlation
-    if corr is not None:
-        if corr < 0.3:
-            score += 1; reasons_bull.append(f'与BTC几乎不相关({corr:.2f})')
-        elif corr > 0.8:
-            reasons_neutral.append(f'跟随BTC({corr:.2f})')
-    
-    # Long/short
-    if ls and ls != '-':
-        if '多' in ls:
-            reasons_bull.append(f'大户偏多({ls})')
-        elif '空' in ls:
-            reasons_bear.append(f'大户偏空({ls})')
-    
-    # Amplitude
-    if amp > 20:
-        reasons_neutral.append(f'振幅{amp:.0f}%偏大，交投活跃')
-    elif amp < 2:
-        reasons_neutral.append(f'振幅{amp:.1f}%清淡')
-    
-    # MACD
-    macd_val = sig.get('macd')
-    macd_sig_val = sig.get('macd_signal')
-    macd_hist = sig.get('macd_hist')
-    if macd_val is not None and macd_sig_val is not None:
-        if macd_val > macd_sig_val:
+            reasons_neutral.append("均线之间震荡")
+
+    # 5. Orderbook
+    if ob_label:
+        if "买盘强" in str(ob_label):
+            score += 1; reasons_bull.append("盘口买盘明显强于卖盘，下方有支撑")
+        elif "卖盘强" in str(ob_label):
+            score -= 1; reasons_bear.append("盘口卖盘压制，上方抛压较重")
+
+    # 6. Wall Score
+    if wall_score == 2:
+        score += 2; reasons_bull.append("买盘挂单墙远厚于卖盘，强力支撑")
+    elif wall_score == 1:
+        score += 1; reasons_bull.append("买盘挂单墙略厚，偏多")
+    elif wall_score == -2:
+        score -= 2; reasons_bear.append("卖盘挂单墙远厚于买盘，强力压制")
+    elif wall_score == -1:
+        score -= 1; reasons_bear.append("卖盘挂单墙略厚，偏空")
+
+    # 7. Cum Imbalance
+    if cum_imbalance > 1.5:
+        score += 1; reasons_bull.append(f"近端买卖失衡比{cum_imbalance:.1f}，买盘活跃")
+
+    # 8. Large Trades
+    if lt_label:
+        if "大单净买" in str(lt_label):
+            score += 1; reasons_bull.append("大单净买入，大户在吸筹")
+        elif "大单净卖" in str(lt_label):
+            score -= 1; reasons_bear.append("大单净卖出，大户在出货")
+
+    # 9. BTC correlation
+    if btc_corr is not None:
+        if btc_corr < 0.2:
+            score += 1; reasons_bull.append(f"与BTC几乎不相关({btc_corr:.2f})，独立行情")
+        elif btc_corr > 0.85:
+            reasons_neutral.append(f"高度跟随BTC(相关{btc_corr:.2f})，涨跌看BTC脸色")
+
+    # 10. Long/Short
+    if ls_label and ls_label != "-":
+        if "多" in ls_label:
+            reasons_bull.append(f"大户偏多({ls_label})")
+        elif "空" in ls_label:
+            reasons_bear.append(f"大户偏空({ls_label})")
+
+    # 11. MACD
+    if macd_val is not None and macd_sig is not None:
+        if macd_val > macd_sig:
             if macd_hist and macd_hist > 0:
-                score += 2; reasons_bull.append('MACD金叉+放大')
+                score += 2; reasons_bull.append("MACD金叉+放大")
             else:
-                score += 1; reasons_bull.append('MACD金叉')
-        elif macd_val < macd_sig_val:
+                score += 1; reasons_bull.append("MACD金叉")
+        elif macd_val < macd_sig:
             if macd_hist and macd_hist < 0:
-                score -= 2; reasons_bear.append('MACD死叉+放大')
+                score -= 2; reasons_bear.append("MACD死叉+放大")
             else:
-                score -= 1; reasons_bear.append('MACD死叉')
-    
-    # Bollinger
-    bb_u = sig.get('bb_upper')
-    bb_l = sig.get('bb_lower')
-    if bb_u and bb_l and change_24h and amp:
+                score -= 1; reasons_bear.append("MACD死叉")
+
+    # 12. Bollinger
+    if change_24h and amp:
         if change_24h > 5 and amp > 10:
-            reasons_bull.append('布林带开口扩大偏多')
+            reasons_bull.append("布林带开口扩大偏多")
         elif change_24h < -5 and amp > 10:
-            reasons_bear.append('布林带开口扩大偏空')
-    
-    # OBV
-    obv_val = sig.get('obv')
+            reasons_bear.append("布林带开口扩大偏空")
+
+    # 13. OBV
     if obv_val is not None and change_24h is not None:
         if change_24h > 0 and obv_val > 0:
-            score += 1; reasons_bull.append('OBV量价配合良好')
+            score += 1; reasons_bull.append("OBV量价配合良好")
         elif change_24h < 0 and obv_val < 0:
-            score -= 1; reasons_bear.append('OBV资金流出')
+            score -= 1; reasons_bear.append("OBV资金流出")
         elif change_24h > 0 and obv_val < 0:
-            reasons_bear.append('OBV背离，涨势可疑')
-    
-    # MA
-    ma_a = sig.get('ma_above')
-    ma_t = sig.get('ma_total')
-    if ma_a is not None and ma_t:
-        if ma_a == ma_t:
-            score += 2; reasons_bull.append(f'全部{ma_t}均线上方')
-        elif ma_a > ma_t // 2:
-            score += 1; reasons_bull.append(f'多数均线上({ma_a}/{ma_t})')
-        elif ma_a == 0:
-            score -= 2; reasons_bear.append(f'全部{ma_t}均线下')
-        else:
-            reasons_neutral.append('均线之间震荡')
-    
-    # Active buy/sell
-    abr = sig.get('active_buy_ratio')
-    if abr:
-        if abr > 0.65:
-            score += 1; reasons_bull.append(f'主动买{abr*100:.0f}%')
-        elif abr < 0.35:
-            score -= 1; reasons_bear.append(f'主动卖{(1-abr)*100:.0f}%')
-    
-    # Premium
-    prem = sig.get('premium')
-    if prem is not None:
-        if prem > 0.5:
-            score += 1; reasons_bull.append(f'合约溢价{prem:.1f}%')
-        elif prem < -0.5:
-            score -= 1; reasons_bear.append(f'合约折价{abs(prem):.1f}%')
-    
+            reasons_bear.append("OBV背离，涨势可疑")
+
+    # 14. Active buy/sell
+    if active_buy_ratio is not None:
+        if active_buy_ratio > 0.65:
+            score += 1; reasons_bull.append(f"主动买{active_buy_ratio*100:.0f}%")
+        elif active_buy_ratio < 0.35:
+            score -= 1; reasons_bear.append(f"主动卖{(1-active_buy_ratio)*100:.0f}%")
+
+    # 15. Premium
+    if premium is not None:
+        if premium > 0.5:
+            score += 1; reasons_bull.append(f"合约溢价{premium:.1f}%")
+        elif premium < -0.5:
+            score -= 1; reasons_bear.append(f"合约折价{abs(premium):.1f}%")
+
+    # 16. Funding rate
+    if funding_rate is not None:
+        if funding_rate > 0.15:
+            score -= 3; reasons_bear.append(f"资金费率极高({funding_rate:.3f}%)！多头极度拥挤")
+        elif funding_rate > 0.08:
+            score -= 1; reasons_bear.append(f"资金费率偏高({funding_rate:.3f}%)")
+        elif funding_rate < -0.08:
+            score += 2; reasons_bull.append(f"资金费率深度为负({funding_rate:.3f}%)，逼空行情可能上演")
+        elif funding_rate < -0.03:
+            score += 1; reasons_bull.append(f"资金费率偏负({funding_rate:.3f}%)，空头付费")
+
+    # 17. OI change
+    if oi_chg_pct is not None:
+        if change_24h > 3 and oi_chg_pct > 5:
+            score += 2; reasons_bull.append(f"价涨OI增{oi_chg_pct:+.1f}%，多头加仓趋势")
+        elif change_24h > 3 and oi_chg_pct < -5:
+            score -= 1; reasons_bear.append(f"价涨但OI大减{abs(oi_chg_pct):.1f}%，多头获利了结")
+        elif change_24h < -3 and oi_chg_pct > 5:
+            score += 1; reasons_bull.append(f"价跌但OI增{oi_chg_pct:.1f}%，有资金逆势抄底")
+        elif change_24h < -3 and oi_chg_pct < -5:
+            score -= 2; reasons_bear.append("价跌OI也跌，多头止损踩踏")
+
+    # 18. Amplitude
+    if amp > 30:
+        reasons_neutral.append(f"24h振幅高达{amp:.1f}%，波动剧烈")
+    elif amp > 15:
+        reasons_neutral.append(f"振幅{amp:.1f}%偏大，交投活跃")
+
     # Verdict
     if score >= 6:
-        verdict = '🟢强烈看涨'
-        suggestion = '多指标共振，可顺势做多，但注意RSI超买时减仓'
+        verdict = "🟢强烈看涨"
+        suggestion = "多指标共振，可顺势做多，但注意RSI超买时减仓"
     elif score >= 3:
-        verdict = '🟢看涨'
-        suggestion = '趋势偏多，可考虑入场'
+        verdict = "🟢看涨"
+        suggestion = "趋势偏多，可考虑入场"
     elif score >= 1:
-        verdict = '🟡偏多'
-        suggestion = '略偏多，轻仓试探'
+        verdict = "🟡偏多"
+        suggestion = "略偏多，轻仓试探"
     elif score <= -6:
-        verdict = '🔴强烈看跌'
-        suggestion = '多指标共振看空，回避'
+        verdict = "🔴强烈看跌"
+        suggestion = "多指标共振看空，回避"
     elif score <= -3:
-        verdict = '🔴看跌'
-        suggestion = '偏空，不宜做多'
+        verdict = "🔴看跌"
+        suggestion = "偏空，不宜做多"
     elif score <= -1:
-        verdict = '🟠偏空'
-        suggestion = '空头，减仓观望'
+        verdict = "🟠偏空"
+        suggestion = "空头，减仓观望"
     else:
-        verdict = '⚪震荡'
-        suggestion = '方向不明，观望等待'
-    
-    sig['analysis'] = '☁️正常'
-    sig['score'] = score
-    sig['verdict'] = verdict
-    sig['suggestion'] = suggestion
-    sig['reasons_bull'] = reasons_bull
-    sig['reasons_bear'] = reasons_bear
-    sig['reasons_neutral'] = reasons_neutral
-    return verdict
+        verdict = "⚪震荡"
+        suggestion = "方向不明，观望等待"
 
+    return {
+        "score": score,
+        "verdict": verdict,
+        "suggestion": suggestion,
+        "reasons_bull": reasons_bull,
+        "reasons_bear": reasons_bear,
+        "reasons_neutral": reasons_neutral,
+    }
+
+
+def _analyze_signal_detailed(sig):
+    """统一评分：调用共享函数"""
+    d = {
+        "change_24h": sig.get("change_pct", 0),
+        "c1": sig.get("change_1h"),
+        "c4": sig.get("change_4h"),
+        "rsi": sig.get("rsi_1h"),
+        "mas_dict": {},
+        "price": sig.get("spot_price", 0),
+        "ob_label": sig.get("ob_label", ""),
+        "wall_score": sig.get("wall_score", 0),
+        "cum_imbalance": sig.get("cum_imbalance", 1.0),
+        "lt_label": sig.get("lt_label", ""),
+        "btc_corr": sig.get("btc_corr"),
+        "ls_label": sig.get("ls_label", ""),
+        "macd_val": sig.get("macd"),
+        "macd_sig": sig.get("macd_signal"),
+        "macd_hist": sig.get("macd_hist"),
+        "amp": sig.get("amplitude", 0),
+        "obv_val": sig.get("obv"),
+        "active_buy_ratio": sig.get("active_buy_ratio"),
+        "premium": sig.get("premium"),
+        "funding_rate": sig.get("funding_rate"),
+        "oi_chg_pct": sig.get("oi_chg_pct"),
+    }
+    # Build mas_dict from ma_above/ma_total (we approximate)
+    if sig.get("ma_total"):
+        for i in range(sig["ma_total"]):
+            d["mas_dict"][f"MA{i+1}"] = sig.get("spot_price", 0) * (1.0 - 0.01 * (sig["ma_total"] - sig.get("ma_above", 0)))
+
+    result = _compute_unified_score(d)
+    sig["score"] = result["score"]
+    sig["verdict"] = result["verdict"]
+    sig["suggestion"] = result["suggestion"]
+    sig["reasons_bull"] = result["reasons_bull"]
+    sig["reasons_bear"] = result["reasons_bear"]
+    sig["reasons_neutral"] = result["reasons_neutral"]
+    sig["analysis"] = "☁️正常"
+    return result["verdict"]
 
 
 
@@ -704,6 +753,33 @@ def do_analyze_coin(sym):
     except:
         pass
     
+
+    # Additional deep data (MACD, OBV, Bollinger, WallScore, LargeTrades, ActiveBuy, Premium)
+    macd_val = macd_sig = macd_hist = obv_val = None
+    wall_score = cum_imbalance = 0
+    lt_label = premium = active_buy_ratio = None
+    try:
+        closes_1h2 = collector.get_klines(sym, "1h", 35)
+        volumes_1h = collector.get_kline_volumes(sym, "1h", 35)
+        if len(closes_1h2) >= 26:
+            macd_val, macd_sig, macd_hist = collector.calc_macd(closes_1h2)
+        if len(closes_1h2) >= 2 and len(volumes_1h) >= 2:
+            obv_val, _ = collector.calc_obv(closes_1h2, volumes_1h)
+    except:
+        pass
+    try:
+        ratio_deep, ob_label2, cum_imbalance, wall_score = collector.get_orderbook_deep(sym)
+    except:
+        pass
+    try:
+        premium = collector.get_premium_index(sym)
+    except:
+        pass
+    try:
+        abr, abl, _, lt_label = collector.get_active_buy_sell_ratio(sym)
+        active_buy_ratio = abr
+    except:
+        pass
     # BTC correlation
     corr = None
     try:
@@ -729,129 +805,52 @@ def do_analyze_coin(sym):
     except:
         pass
     
-    # === STEP 2: Compute verdict ===
-    score = 0
-    reasons_bull = []
-    reasons_bear = []
-    reasons_neutral = []
+        # === STEP 2: Compute verdict (unified) ===
+    d = {
+        "change_24h": change_24h,
+        "c1": c1, "c4": c4,
+        "rsi": rsi_1h,
+        "mas_dict": mas,
+        "price": price,
+        "ob_label": ob_label,
+        "wall_score": wall_score,
+        "cum_imbalance": cum_imbalance,
+        "lt_label": lt_label,
+        "btc_corr": corr,
+        "ls_label": ls_label,
+        "macd_val": macd_val, "macd_sig": macd_sig, "macd_hist": macd_hist,
+        "amp": amp,
+        "obv_val": obv_val,
+        "active_buy_ratio": active_buy_ratio,
+        "premium": premium,
+        "funding_rate": funding,
+        "oi_chg_pct": oi_chg,
+    }
+    result = _compute_unified_score(d)
+    score = result["score"]
+    reasons_bull = result["reasons_bull"]
+    reasons_bear = result["reasons_bear"]
+    reasons_neutral = result["reasons_neutral"]
+    verdict_label = result["verdict"]
+    suggestion = result["suggestion"]
     
-    if change_24h > 15:
-        score += 3; reasons_bull.append(f'24h暴涨{change_24h:.1f}%，市场情绪极度亢奋，但追高风险也大')
-    elif change_24h > 8:
-        score += 2; reasons_bull.append(f'24h大涨{change_24h:.1f}%，资金明显流入，趋势强劲')
-    elif change_24h > 3:
-        score += 1; reasons_bull.append(f'24h涨{change_24h:.1f}%，走势稳健偏多')
-    elif change_24h < -15:
-        score -= 3; reasons_bear.append(f'24h暴跌{abs(change_24h):.1f}%，市场极度恐慌')
-    elif change_24h < -8:
-        score -= 2; reasons_bear.append(f'24h大跌{abs(change_24h):.1f}%，抛压明显')
-    elif change_24h < -3:
-        score -= 1; reasons_bear.append(f'24h跌{abs(change_24h):.1f}%，走势偏弱')
-    
-    if c1 is not None and c4 is not None:
-        if c1 > 3 and c4 > 5:
-            score += 2; reasons_bull.append(f'1h涨{c1:.1f}%、4h涨{c4:.1f}%，短中期同步拉升')
-        elif c1 > 0 and c4 > 0:
-            score += 1; reasons_bull.append(f'短中期均上涨(1h{c1:+.1f}%/4h{c4:+.1f}%)')
-        elif c1 < -3 and c4 < -5:
-            score -= 2; reasons_bear.append(f'1h跌{abs(c1):.1f}%、4h跌{abs(c4):.1f}%，加速下跌中')
-        elif c1 < 0 and c4 < 0:
-            score -= 1; reasons_bear.append('短中期均下跌，空头主导')
-        elif c1 > 0 and c4 < 0:
-            reasons_neutral.append('1h涨但4h跌，短期反弹但中期趋势不乐观')
-        elif c1 < 0 and c4 > 0:
-            reasons_neutral.append('1h回调但4h仍涨，可能是健康的回踩')
-    
-    if rsi_1h is not None:
-        if rsi_1h > 85:
-            score -= 2; reasons_bear.append(f'RSI高达{rsi_1h:.0f}，极度超买，随时可能大幅回调')
-        elif rsi_1h > 70:
-            score -= 1; reasons_bear.append(f'RSI={rsi_1h:.0f}进入超买区')
-        elif rsi_1h < 20:
-            score += 2; reasons_bull.append(f'RSI仅{rsi_1h:.0f}，深度超卖，反弹概率很高')
-        elif rsi_1h < 30:
-            score += 1; reasons_bull.append(f'RSI={rsi_1h:.0f}偏低，超卖区域')
-        elif 40 <= rsi_1h <= 60:
-            reasons_neutral.append(f'RSI={rsi_1h:.0f}中性，无极端信号')
-    
-    if mas:
-        above_ma = sum(1 for v in mas.values() if price > v)
-        total_ma = len(mas)
-        if above_ma == total_ma:
-            score += 2; reasons_bull.append(f'价格站上全部{total_ma}条均线，多头排列')
-        elif above_ma > total_ma // 2:
-            score += 1; reasons_bull.append(f'价格在多数均线上方({above_ma}/{total_ma})')
-        elif above_ma == 0:
-            score -= 2; reasons_bear.append(f'价格在全部{total_ma}条均线下方，空头排列')
-        else:
-            reasons_neutral.append('价格在均线之间震荡，方向不明确')
-    
-    if ob_label and ob_label != '-':
-        if '买盘强' in str(ob_label):
-            score += 1; reasons_bull.append('盘口买盘明显强于卖盘，下方有支撑')
-        elif '卖盘强' in str(ob_label):
-            score -= 1; reasons_bear.append('盘口卖盘压制，上方抛压较重')
-    
-    if funding is not None:
-        if funding > 0.15:
-            score -= 3; reasons_bear.append(f'资金费率极高({funding:.3f}%)！多头极度拥挤')
-        elif funding > 0.08:
-            score -= 1; reasons_bear.append(f'资金费率偏高({funding:.3f}%)')
-        elif funding < -0.08:
-            score += 2; reasons_bull.append(f'资金费率深度为负({funding:.3f}%)，逼空行情可能上演')
-        elif funding < -0.03:
-            score += 1; reasons_bull.append(f'资金费率偏负({funding:.3f}%)，空头付费')
-    
-    if oi_chg is not None:
-        if change_24h > 3 and oi_chg > 5:
-            score += 2; reasons_bull.append(f'价涨OI增{oi_chg:+.1f}%，多头加仓趋势')
-        elif change_24h > 3 and oi_chg < -5:
-            score -= 1; reasons_bear.append(f'价涨但OI大减{abs(oi_chg):.1f}%，多头获利了结')
-        elif change_24h < -3 and oi_chg > 5:
-            score += 1; reasons_bull.append(f'价跌但OI增{oi_chg:.1f}%，有资金逆势抄底')
-        elif change_24h < -3 and oi_chg < -5:
-            score -= 2; reasons_bear.append('价跌OI也跌，多头止损踩踏')
-    
-    if corr is not None:
-        if corr < 0.2:
-            score += 1; reasons_bull.append(f'与BTC几乎不相关({corr:.2f})，独立行情')
-        elif corr > 0.85:
-            reasons_neutral.append(f'高度跟随BTC(相关{corr:.2f})，涨跌看BTC脸色')
-    
-    if amp > 30:
-        reasons_neutral.append(f'24h振幅高达{amp:.1f}%，波动剧烈，短线机会多但风险也大')
-    elif amp > 15:
-        reasons_neutral.append(f'振幅{amp:.1f}%偏大，交投活跃')
-    
-    if turnover > 0:
-        if turnover > 200:
-            reasons_neutral.append(f'换手率极高({turnover:.0f}%)，筹码快速换手')
-        elif turnover > 80:
-            reasons_neutral.append(f'换手率偏高({turnover:.0f}%)，交易活跃')
-    
+    # Format verdict HTML
     if score >= 6:
-        verdict_text = f'<span style="color:green;font-size:20px"><b>强烈看涨</b></span>'
-        suggestion = '多个指标共振看多，可顺势做多，但注意RSI超买时减仓'
+        verdict_text = f'<span style="color:green;font-size:20px"><b>{verdict_label}</b></span>'
     elif score >= 3:
-        verdict_text = f'<span style="color:green;font-size:20px"><b>看涨</b></span>'
-        suggestion = '整体偏多，可以轻仓跟进，设好止损'
+        verdict_text = f'<span style="color:green;font-size:20px"><b>{verdict_label}</b></span>'
     elif score >= 1:
-        verdict_text = f'<span style="color:#88aa00;font-size:20px"><b>偏多</b></span>'
-        suggestion = '略偏多头，但信号不够强，建议小仓位试探'
+        verdict_text = f'<span style="color:#88aa00;font-size:20px"><b>{verdict_label}</b></span>'
     elif score >= -1:
-        verdict_text = f'<span style="color:#888;font-size:20px"><b>震荡中性</b></span>'
-        suggestion = '方向不明确，建议观望等待信号明朗'
+        verdict_text = f'<span style="color:#888;font-size:20px"><b>{verdict_label}</b></span>'
     elif score >= -3:
-        verdict_text = f'<span style="color:#cc6600;font-size:20px"><b>偏空</b></span>'
-        suggestion = '略偏空头，不建议追多，已有仓位注意风险'
+        verdict_text = f'<span style="color:#cc6600;font-size:20px"><b>{verdict_label}</b></span>'
     elif score >= -6:
-        verdict_text = f'<span style="color:red;font-size:20px"><b>看跌</b></span>'
-        suggestion = '空头信号较多，回避做多，可考虑减仓'
+        verdict_text = f'<span style="color:red;font-size:20px"><b>{verdict_label}</b></span>'
     else:
-        verdict_text = f'<span style="color:red;font-size:20px"><b>强烈看跌</b></span>'
-        suggestion = '多个指标共振看空，建议离场观望，不要抄底'
+        verdict_text = f'<span style="color:red;font-size:20px"><b>{verdict_label}</b></span>'
     
-    # === STEP 3: Build HTML with verdict FIRST ===
+# === STEP 3: Build HTML with verdict FIRST ===
     lines = []
     lines.append(f'<h2>{sym} 综合分析</h2>')
     
@@ -1018,7 +1017,7 @@ class MainWindow(QMainWindow):
     def _start_scheduler(self):
         self.scheduler = BackgroundScheduler()
         cfg = get_config()
-        cpm = 4
+        cpm = max(1, min(7, cfg.get('checks_per_minute', 4)))
         self.scheduler.add_job(self._run_check,'interval',minutes=1/cpm,id='c')
         self.scheduler.add_job(self._fetch_news, 'interval', minutes=cfg.get('news_interval_minutes',10), id='news')
         self.scheduler.start()
@@ -1081,7 +1080,7 @@ class MainWindow(QMainWindow):
         try:
             import collector
             used, limit, remaining = collector.get_weight_status()
-            if used > limit * 0.85:  # Over 85%, wait for next minute
+            if limit > 0 and used > limit * 0.90:  # Over 90%, wait for next minute
                 self._log(f'[{ts}] 跳过: API已用{used}/{limit} ({used/limit*100:.0f}%)，等待下分钟刷新')
                 return
         except:
@@ -1234,7 +1233,7 @@ class MainWindow(QMainWindow):
             try: self.scheduler.remove_job('c')
             except: pass
             cfg = get_config()
-            cpm = 4
+            cpm = max(1, min(7, new_cfg.get('checks_per_minute', 4)))
             self.scheduler.add_job(self._run_check,'interval',minutes=1/cpm,id='c')
             # Rate limit check
             try:
