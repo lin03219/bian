@@ -265,6 +265,7 @@ class Notifier:
         overview = ''
         print(f'[FEISHU DEBUG] overview init done')
         
+        all_signals = []
         for sig in signals[:15]:
             typ = sig.get('type', '')
             if typ == 'market_overview':
@@ -298,7 +299,7 @@ class Notifier:
             reasons_neutral = sig.get('reasons_neutral', [])
             entry_lines = []
             # 只显示：币名 + 1h/4h + 评分
-            entry_lines.append('**{} [{:+d}]**  {} {}'.format(coin, score, _fc(c1), _fc(c4)))
+            entry_lines.append("<font color='#0066FF'>●</font> **{} [{:+d}]**  {} {}".format(coin, score, _fc(c1), _fc(c4)))
             entry = chr(10).join(entry_lines)
 
 
