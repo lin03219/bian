@@ -468,7 +468,6 @@ _BINANCE_WEIGHTS.update({
 })
 
 def get_active_buy_sell_ratio(symbol):
-    """Get active buy/sell ratio from recent trades"""
     try:
         trades = _get_binance('/aggTrades', {'symbol': symbol + 'USDT', 'limit': 500})
         buy_vol = sum(float(t['qty']) * float(t['price']) for t in trades if not t.get('isBuyerMaker', True))
@@ -485,7 +484,6 @@ def get_active_buy_sell_ratio(symbol):
         return 0.5, '-', 0, 0
 
 def get_premium_index(symbol):
-    """Get contract premium vs spot. Positive = futures premium"""
     try:
         data = _get_binance('/fapi/v1/premiumIndex', {'symbol': symbol + 'USDT'})
         idx = float(data.get('indexPrice', 0))
