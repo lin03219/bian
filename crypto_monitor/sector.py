@@ -28,7 +28,7 @@ COIN_SECTORS = {
     'PYTH': ['Oracle'], 'BAND': ['Oracle'], 'API3': ['Oracle'], 'TRB': ['Oracle'],
     'BLUR': ['NFT'], 'GMT': ['NFT', 'GameFi'], 'SUPER': ['NFT', 'GameFi'],
     'HIGH': ['Metaverse'], 'ALICE': ['Metaverse'],
-    'TIA': ['Modular'], 'DYM': ['Modular'], 'SAGA': ['Modular'],
+    'TIA': ['Modular'], 'DYM': ['Modular'], 'SAGA': ['Layer1', 'Modular'],
     'XRP': ['支付'], 'XLM': ['支付'], 'LTC': ['支付', '蓝筹'], 'BCH': ['支付'],
     'ZEC': ['隐私'], 'XMR': ['隐私'],
 }

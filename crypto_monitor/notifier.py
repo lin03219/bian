@@ -413,6 +413,7 @@ class Notifier:
             return False, str(e)[:200]
     def send_arb_batch(self, arb_signals):
         """发送套利信号到独立飞书群"""
+        print('[ARB DEBUG] send_arb_batch called, signals: {}'.format(len(arb_signals)))
         cfg = get_config()
         url = cfg.get("arb_webhook_url", "")
         secret = cfg.get("arb_feishu_secret", "")
@@ -426,20 +427,20 @@ class Notifier:
             coin = a.get("coin", "")
             spot = a.get("spot_price", 0)
             mark = a.get("mark_price", 0)
-            prem = a.get("spot_premium", 0)
-            fr = a.get("funding_rate", 0)
+            prem = a.get("spot_premium") or 0
+            fr = a.get("funding_rate") or 0
             ob = a.get("ob_label", "")
             ws = a.get("wall_score", 0)
             oi = a.get("oi_label", "")
             
             # 综合评分
             arb_score = 0
-            if prem >= 0.5:
+            if (prem or 0) >= 0.5:
                 arb_score += 3
-            elif prem >= 0.3:
+            elif (prem or 0) >= 0.3:
                 arb_score += 1
             # 盘口深度
-            if ob == "买盘强" or ws >= 1:
+            if ob == "买盘强" or (ws or 0) >= 1:
                 arb_score += 1
             # OI稳定
             if oi and oi not in ("多头加仓", "空头加仓"):
@@ -452,7 +453,7 @@ class Notifier:
             else:
                 continue
             
-            fr_sign = "+" if fr > 0 else ""
+            fr_sign = "+" if (fr or 0) > 0 else ""
             info = f"溢价{prem:.1f}%"
             if ob:
                 info += f" {ob}"

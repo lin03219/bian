@@ -67,6 +67,8 @@ class MonitorWorker(QThread):
                         if n >= 4:
                             recent = closes[-4:]
                             s['amplitude'] = round((max(recent) - min(recent)) / closes[-1] * 100, 1)
+                        if n >= 1:
+                            s['spot_price'] = closes[-1]
                     except:
                         pass
             # 获取合约持仓量判断方向
@@ -124,7 +126,7 @@ class MonitorWorker(QThread):
                 try:
                     s['premium'] = collector.get_premium_index(sym)
                     s['funding_rate'] = collector.get_funding_rate(sym)
-                    spot_p = s.get('price', 0)
+                    spot_p = s.get('spot_price') or 0
                     mark_p, spot_prem, fr2 = collector.get_arb_metrics(sym, spot_p)
                     s['mark_price'] = mark_p
                     s['spot_premium'] = spot_prem
@@ -202,8 +204,28 @@ class MonitorWorker(QThread):
                         self.status_update.emit('推送完成')
                     else:
                         self.status_update.emit(f'推送失败: {msg}')
-                    # 套利扫描（独立飞书群）
-                    arb_list = [s for s in signals[:15] if s.get("spot_premium", 0) >= 0.15]
+                    # ??????????, ??100??
+                    arb_list = []
+                    for c in coins[:100]:
+                        sym = c.get("symbol", "")
+                        spot_p = c.get("price", 0)
+                        if spot_p <= 0:
+                            continue
+                        try:
+                            mark_p, prem, fr = collector.get_arb_metrics(sym, spot_p)
+                            if 0.12 <= prem <= 30:
+                                arb_list.append({
+                                    "coin": sym,
+                                    "spot_price": spot_p,
+                                    "mark_price": mark_p,
+                                    "spot_premium": prem,
+                                    "funding_rate": fr,
+                                    "ob_label": "",
+                                    "wall_score": 0,
+                                    "oi_label": "",
+                                })
+                        except:
+                            pass
                     if arb_list:
                         self.notifier.send_arb_batch(arb_list)
             now = datetime.now().strftime('%H:%M:%S')
