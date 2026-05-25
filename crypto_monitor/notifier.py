@@ -349,7 +349,8 @@ class Notifier:
             entry = chr(10).join(entry_lines)
 
 
-            all_signals.append((score, entry))
+            if score >= 1:
+                all_signals.append((score, entry))
         
         md_lines.append(f'> {overview}')
         md_lines.append('')
