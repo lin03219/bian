@@ -76,6 +76,8 @@ class Notifier:
         self.dingtalk_secret = config.get('dingtalk_secret', '')
         self.feishu_secret = config.get('feishu_secret', '')
         self.last_push_time = 0
+        if not hasattr(Notifier, '_prev_coins'):
+            Notifier._prev_coins = set()
 
     def is_configured(self):
         return bool(self.webhook_url)
@@ -340,7 +342,10 @@ class Notifier:
             # 只显示：币名 + 1h/4h + 评分
             summary = _make_summary(score, reasons_bull, reasons_bear)
             accu = _check_accumulation(sig)
-            entry_lines.append("<font color='#0066FF'>\u25cf</font> **{} [{:+d}]** {}{}".format(coin, score, summary, accu))
+            is_new = sig.get("is_new", False)
+            dot_color = '#FF6600' if is_new else '#0066FF'
+            new_tag = ' 🆕' if is_new else ''
+            entry_lines.append("<font color='{}'>\u25cf</font> **{} [{:+d}]** {}{}{}".format(dot_color, coin, score, summary, accu, new_tag))
             entry = chr(10).join(entry_lines)
 
 
@@ -400,7 +405,9 @@ class Notifier:
             print(f"[FEISHU DEBUG] posting to feishu, md_content({len(md_content)} chars): {md_content[:100]}")
             resp = requests.post(url, json=payload, timeout=15, proxies=proxies)
             result = resp.json()
-            code = result.get('code') or result.get('StatusCode')
+            code = result.get('code')
+            if code is None:
+                code = result.get('StatusCode')
             if code == 0:
                 print(f"[FEISHU] send OK")
                 return True, ''

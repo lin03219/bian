@@ -24,6 +24,9 @@ from notifier import Notifier
 from config import get_config, save_config
 
 
+# Module-level prev coins for new-coin detection across cycles
+_prev_coins = set()
+
 class MonitorWorker(QThread):
     signals_detected = Signal(list)
     status_update = Signal(str)
@@ -35,6 +38,7 @@ class MonitorWorker(QThread):
         self.notifier = Notifier(self.cfg)
 
     def run(self):
+        global _prev_coins
         import time as _t2
         _t_total = _t2.time()
         _t1 = _t_total
@@ -131,7 +135,7 @@ class MonitorWorker(QThread):
                     if mas:
                         price = s.get('price', closes[-1])
                         above = sum(1 for v in mas.values() if price > v)
-                        s['ma_above'] = above; s['ma_total'] = len(mas)
+                        s['ma_above'] = above; s['ma_total'] = len(mas); s['ma_values'] = mas
                 except:
                     pass
                 # Contract: premium + funding + index (1 API call)
@@ -146,8 +150,9 @@ class MonitorWorker(QThread):
                     pass
                 # Active buy/sell (1wgt)
                 try:
-                    abr, abl, _, _ = collector.get_active_buy_sell_ratio(sym)
+                    abr, abl, buy_vol, sell_vol = collector.get_active_buy_sell_ratio(sym)
                     s['active_buy_ratio'] = abr
+                    s['lt_label'] = abl if abl and abl != '-' else ''
                 except:
                     pass
                 # Long/short ratio (2wgt)
@@ -178,7 +183,10 @@ class MonitorWorker(QThread):
             _t1 = _t2.time()
             # 综合数据分析，生成总结标签
             for s in signals[:15]:
-                _analyze_signal_detailed(s)
+                try:
+                    _analyze_signal_detailed(s)
+                except Exception as _e:
+                    self.status_update.emit(f'评分失败 {s.get("coin","?")}: {_e}')
             
             # 板块分析
             try:
@@ -215,7 +223,13 @@ class MonitorWorker(QThread):
                 self.signals_detected.emit(signals)
                 if self.notifier.is_configured():
                     self.status_update.emit(f'推送 {len(signals)} 条信号到飞书...')
+                    # New-coin detection: compare with previous round
+                    for sig in signals:
+                        if sig.get("type", "") not in ("market_overview", "sector"):
+                            sig["is_new"] = sig.get("coin", "").upper() not in _prev_coins
                     ok, msg = self.notifier.send_batch(signals)
+                    if ok:
+                        _prev_coins = {s.get("coin","").upper() for s in signals if s.get("type","") not in ("market_overview", "sector")}
                     if ok:
                         self.status_update.emit(f'推送完成 (总耗时{_t2.time()-_t_total:.1f}s)')
                     else:
@@ -684,8 +698,10 @@ def _analyze_signal_detailed(sig):
         "funding_rate": sig.get("funding_rate"),
         "oi_chg_pct": sig.get("oi_chg_pct"),
     }
-    # Build mas_dict from ma_above/ma_total (we approximate)
-    if sig.get("ma_total"):
+    # Use real MA values if available
+    if sig.get("ma_values"):
+        d["mas_dict"] = sig["ma_values"]
+    elif sig.get("ma_total"):
         for i in range(sig["ma_total"]):
             d["mas_dict"][f"MA{i+1}"] = sig.get("spot_price", 0) * (1.0 - 0.01 * (sig["ma_total"] - sig.get("ma_above", 0)))
 
