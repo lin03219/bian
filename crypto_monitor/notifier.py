@@ -299,6 +299,7 @@ class Notifier:
             reasons_bear = sig.get('reasons_bear', [])
             reasons_neutral = sig.get('reasons_neutral', [])
             entry_lines = []
+            entry_lines.append('---')
             entry_lines.append('{} \u8bc4\u5206 {:+.0f}'.format(verdict, score))
             entry_lines.append('\U0001f4a1 ' + suggestion)
             entry_lines.append('**{}**  1h:{}  4h:{}'.format(coin, _fc(c1), _fc(c4)))

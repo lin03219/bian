@@ -467,6 +467,36 @@ _BINANCE_WEIGHTS.update({
     '/trades': 5,
 })
 
+def get_active_buy_sell_ratio(symbol):
+    """Get active buy/sell ratio from recent trades"""
+    try:
+        trades = _get_binance('/aggTrades', {'symbol': symbol + 'USDT', 'limit': 500})
+        buy_vol = sum(float(t['qty']) * float(t['price']) for t in trades if not t.get('isBuyerMaker', True))
+        sell_vol = sum(float(t['qty']) * float(t['price']) for t in trades if t.get('isBuyerMaker', True))
+        total = buy_vol + sell_vol
+        if total > 0:
+            ratio = buy_vol / total
+            if ratio > 0.6: label = '主动买盘强'
+            elif ratio < 0.4: label = '主动卖盘强'
+            else: label = '买卖均衡'
+            return ratio, label, buy_vol, sell_vol
+        return 0.5, '-', 0, 0
+    except:
+        return 0.5, '-', 0, 0
+
+def get_premium_index(symbol):
+    """Get contract premium vs spot. Positive = futures premium"""
+    try:
+        data = _get_binance('/fapi/v1/premiumIndex', {'symbol': symbol + 'USDT'})
+        idx = float(data.get('indexPrice', 0))
+        mark = float(data.get('markPrice', 0))
+        if idx > 0:
+            premium = (mark / idx - 1) * 100
+            return premium
+        return None
+    except:
+        return None
+
 def get_kline_volumes(symbol, interval="1h", limit=100):
     """获取K线成交量列表"""
     kls = _get_binance("/klines", {"symbol": symbol + "USDT", "interval": interval, "limit": str(limit)})
