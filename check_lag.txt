@@ -1,0 +1,52 @@
+Line 352:                 # Show laggards (catch-up candidates)
+349:                     cs += f' <font color=\'{pc}\'>{sym}({p:+.1f}%)</font>'
+350:                 ac = '#00AA00' if avg > 0 else ('#DD0000' if avg < 0 else '#888888')
+351:                 md_lines.append(f'- **<font color=\'{ac}\'>{name}</font>** {dirr}{abs(avg):.1f}%  ({cnt}\u5e01){cs}')
+352:                 # Show laggards (catch-up candidates)
+353:                 laggards = ss.get("laggards", [])
+354:                 if laggards:
+355:                     ls = ""
+356:                     for sym, chg, vol in laggards[:5]:
+357:                         lc = "#00AA00" if chg > 0 else ("#DD0000" if chg < 0 else "#888888")
+358:                         ls += f" <font color='{lc}'>{sym}({chg:+.1f}%)"
+359:                     md_lines.append(f"  💤补涨候选:{ls}")
+---
+Line 353:                 laggards = ss.get("laggards", [])
+350:                 ac = '#00AA00' if avg > 0 else ('#DD0000' if avg < 0 else '#888888')
+351:                 md_lines.append(f'- **<font color=\'{ac}\'>{name}</font>** {dirr}{abs(avg):.1f}%  ({cnt}\u5e01){cs}')
+352:                 # Show laggards (catch-up candidates)
+353:                 laggards = ss.get("laggards", [])
+354:                 if laggards:
+355:                     ls = ""
+356:                     for sym, chg, vol in laggards[:5]:
+357:                         lc = "#00AA00" if chg > 0 else ("#DD0000" if chg < 0 else "#888888")
+358:                         ls += f" <font color='{lc}'>{sym}({chg:+.1f}%)"
+359:                     md_lines.append(f"  💤补涨候选:{ls}")
+360:             md_lines.append('')
+---
+Line 354:                 if laggards:
+351:                 md_lines.append(f'- **<font color=\'{ac}\'>{name}</font>** {dirr}{abs(avg):.1f}%  ({cnt}\u5e01){cs}')
+352:                 # Show laggards (catch-up candidates)
+353:                 laggards = ss.get("laggards", [])
+354:                 if laggards:
+355:                     ls = ""
+356:                     for sym, chg, vol in laggards[:5]:
+357:                         lc = "#00AA00" if chg > 0 else ("#DD0000" if chg < 0 else "#888888")
+358:                         ls += f" <font color='{lc}'>{sym}({chg:+.1f}%)"
+359:                     md_lines.append(f"  💤补涨候选:{ls}")
+360:             md_lines.append('')
+361:         
+---
+Line 356:                     for sym, chg, vol in laggards[:5]:
+353:                 laggards = ss.get("laggards", [])
+354:                 if laggards:
+355:                     ls = ""
+356:                     for sym, chg, vol in laggards[:5]:
+357:                         lc = "#00AA00" if chg > 0 else ("#DD0000" if chg < 0 else "#888888")
+358:                         ls += f" <font color='{lc}'>{sym}({chg:+.1f}%)"
+359:                     md_lines.append(f"  💤补涨候选:{ls}")
+360:             md_lines.append('')
+361:         
+362:         md_content = chr(10).join(md_lines)
+363:         
+---

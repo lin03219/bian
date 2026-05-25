@@ -292,18 +292,27 @@ class Notifier:
                 elif v < 0: return f'\u25bc{s}'
                 return s
             
-            entry = f'**{coin}**  1h:{_fc(c1)}  4h:{_fc(c4)}'
+            score = sig.get('score', 0)
+            verdict = sig.get('verdict', '')
+            suggestion = sig.get('suggestion', '')
+            reasons_bull = sig.get('reasons_bull', [])
+            reasons_bear = sig.get('reasons_bear', [])
+            reasons_neutral = sig.get('reasons_neutral', [])
+            entry_lines = []
+            entry_lines.append('{} \u8bc4\u5206 {:+.0f}'.format(verdict, score))
+            entry_lines.append('\U0001f4a1 ' + suggestion)
+            entry_lines.append('**{}**  1h:{}  4h:{}'.format(coin, _fc(c1), _fc(c4)))
             if amp > 0:
-                entry += f'  4h振幅{amp:.0f}%'
-            oi = sig.get('oi_label','')
-            ob = sig.get('ob_label','')
-            if oi and oi != '-':
-                oi_icon = '\u2705' if '多' in oi else '\u274c'
-                entry += f'  {oi_icon}{oi}'
-            if ob and ob != '-' and ob != '均衡':
-                ob_icon = '\u2705' if '买' in ob else '\u274c'
-                entry += f'  {ob_icon}{ob}'
-            # analysis hidden per user request
+                entry_lines.append('4h\u632f\u5e45{:.0f}%'.format(amp))
+            for r in reasons_bull[:3]:
+                entry_lines.append('\u2705 ' + r)
+            for r in reasons_bear[:3]:
+                entry_lines.append('\u274c ' + r)
+            for r in reasons_neutral[:2]:
+                entry_lines.append('\u2796 ' + r)
+            entry = chr(10).join(entry_lines)
+            # detailed analysis with verdict/score/reasons
+
             if pct > 2:
                 bullish_items.append((amp, entry))
             elif pct < -2:

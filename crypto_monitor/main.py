@@ -986,17 +986,13 @@ class MainWindow(QMainWindow):
         self.update_lbl.setVisible(False)
         self.update_lbl.mousePressEvent = lambda e: self._on_update_clicked()
         hl.addWidget(self.update_lbl)
-        self.weight_lbl = QLabel('API: --/1200 wgt')
-        self.weight_lbl.setStyleSheet('color:#888;font-size:11px;padding:2px 8px')
-        hl.addWidget(self.weight_lbl)
-        self.auto_btn = QPushButton('自动检测: OFF')
-        self.auto_btn.setCheckable(True)
-        self.auto_btn.toggled.connect(self._toggle_auto)
-        hl.addWidget(self.auto_btn)
-        
-        self.check_btn = QPushButton('立即检测')
-        self.check_btn.clicked.connect(self._run_check)
-        hl.addWidget(self.check_btn)
+        self.coin_input = QLineEdit()
+        self.coin_input.setPlaceholderText('输入币种代号...')
+        self.coin_input.setMaximumWidth(140)
+        hl.addWidget(self.coin_input)
+        self.coin_analyze_btn = QPushButton('分析')
+        self.coin_analyze_btn.clicked.connect(self._analyze_coin)
+        hl.addWidget(self.coin_analyze_btn)
         lo.addLayout(hl)
         
         self.log_area = QTextEdit()
@@ -1007,6 +1003,13 @@ class MainWindow(QMainWindow):
         self.pause_btn = QPushButton('暂停检测')
         self.pause_btn.clicked.connect(self._toggle_pause)
         bl.addWidget(self.pause_btn)
+        self.auto_btn = QPushButton('自动检测: OFF')
+        self.auto_btn.setCheckable(True)
+        self.auto_btn.toggled.connect(self._toggle_auto)
+        bl.addWidget(self.auto_btn)
+        self.check_btn = QPushButton('立即检测')
+        self.check_btn.clicked.connect(self._run_check)
+        bl.addWidget(self.check_btn)
         bl.addStretch()
         news_btn = QPushButton('新闻监控')
         news_btn.clicked.connect(self._fetch_news)
@@ -1218,6 +1221,20 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
 
+
+    def _analyze_coin(self):
+        sym = self.coin_input.text().strip().upper()
+        if not sym:
+            return
+        self._log(f'正在分析 {sym}...')
+        dlg = CoinAnalysisDialog.__new__(CoinAnalysisDialog)
+        try:
+            dlg._do_analyze(sym)
+            html = dlg.result_area.toHtml()
+            self.log_area.setHtml(html)
+            self._log(f'{sym} 分析完成')
+        except Exception as e:
+            self._log(f'分析失败: {e}')
     def _show_settings(self):
         dlg = SettingsDialog(self)
         if dlg.exec() == QDialog.Accepted:
@@ -1243,18 +1260,9 @@ class MainWindow(QMainWindow):
         try:
             import collector
             used, limit, remaining = collector.get_weight_status()
-            pct = used / limit * 100 if limit > 0 else 0
-            if pct > 90:
-                clr = "red"
-            elif pct > 60:
-                clr = "orange"
-            else:
-                clr = "#888"
-            self.weight_lbl.setText(f"API: {used}/{limit} wgt ({pct:.0f}%) - 重置倒计时 {remaining}s")
-            self.weight_lbl.setStyleSheet(f"color:{clr};font-size:11px;padding:2px")
+            self.setWindowTitle(f'新闻热点  [API: {used}/{limit}]')
         except:
             pass
-
     def _log(self, text):
         self._log_buffer.append(text)
         # Keep only last 200 lines to avoid memory issues

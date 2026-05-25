@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """新闻热点监控
 """
 import requests
@@ -57,7 +57,7 @@ def fetch_santiment():
     except: return []
 
 
-def fetch_all_news():
+def fetch_all_news(cfg=None):
     all_news = []
     cfg = get_config()
     if cfg.get('whale_alert_key'): all_news += fetch_whale_alert()

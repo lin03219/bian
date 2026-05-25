@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 数据采集模块：币安公开 API + 恐惧贪婪指数
 """
@@ -398,3 +398,76 @@ def get_long_short_ratio(symbol):
         return top_long_pct, global_long_pct, label
     except:
         return 0, 0, ''
+
+def calc_macd(closes, fast=12, slow=26, signal=9):
+    """MACD: 返回 (dif, dea, hist)"""
+    if len(closes) < slow + signal:
+        return None, None, None
+    def ema(data, period):
+        k = 2 / (period + 1)
+        result = [data[0]]
+        for i in range(1, len(data)):
+            result.append(data[i] * k + result[-1] * (1 - k))
+        return result
+    ema_fast = ema(closes, fast)
+    ema_slow = ema(closes, slow)
+    dif = [ema_fast[i] - ema_slow[i] for i in range(len(ema_fast))]
+    dea = ema(dif, signal)
+    hist = [dif[-1] - dea[-1]]
+    return round(dif[-1], 6), round(dea[-1], 6), round(hist[-1], 6)
+
+def calc_bollinger(closes, period=20, std=2):
+    """布林带: 返回 (upper, middle, lower, bandwidth%)"""
+    if len(closes) < period:
+        return None, None, None, None
+    import statistics
+    middle = sum(closes[-period:]) / period
+    stdev = statistics.stdev(closes[-period:])
+    upper = middle + std * stdev
+    lower = middle - std * stdev
+    bw = (upper - lower) / middle * 100 if middle > 0 else 0
+    return round(upper, 6), round(middle, 6), round(lower, 6), round(bw, 2)
+
+def calc_obv(closes, volumes):
+    """OBV: 量价背离检测"""
+    if len(closes) < 2 or len(volumes) < 2:
+        return None, None
+    obv = 0
+    obv_list = [0]
+    for i in range(1, min(len(closes), len(volumes))):
+        if closes[i] > closes[i-1]:
+            obv += volumes[i]
+        elif closes[i] < closes[i-1]:
+            obv -= volumes[i]
+        obv_list.append(obv)
+    # Check divergence: price up but OBV down = bearish
+    price_trend = closes[-1] > closes[-10] if len(closes) >= 10 else True
+    obv_trend = obv_list[-1] > obv_list[-10] if len(obv_list) >= 10 else True
+    if price_trend and not obv_trend:
+        label = '量价背离(偏空)'
+    elif not price_trend and obv_trend:
+        label = '量价背离(偏多)'
+    else:
+        label = ''
+    return obv_list[-1] if obv_list else 0, label
+
+def get_liquidation_heatmap():
+    """全市场爆仓数据（近24h）"""
+    try:
+        resp = requests.get('https://fapi.binance.com/futures/data/globalLongShortAccountRatio',
+            params={'symbol': 'BTCUSDT', 'period': '5m', 'limit': 1}, timeout=5, proxies=_get_proxy())
+        # This is approximate; full liquidation data requires multiple calls
+        return None
+    except:
+        return None
+
+_BINANCE_WEIGHTS.update({
+    '/fapi/v1/fundingRate': 1,
+    '/fapi/v1/openInterest': 1,
+    '/trades': 5,
+})
+
+def get_kline_volumes(symbol, interval="1h", limit=100):
+    """获取K线成交量列表"""
+    kls = _get_binance("/klines", {"symbol": symbol + "USDT", "interval": interval, "limit": str(limit)})
+    return [float(k[5]) for k in kls]

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 配置管理模块：Webhook、监控参数、币种列表
 """
@@ -26,6 +26,10 @@ DEFAULT_CONFIG = {
     'santiment_key': '',
     'news_interval_minutes': 10,
     'feishu_secret': '',
+    'rank_webhook_url': '',       # 排行榜独立推送webhook
+    'rank_push_seconds': 30,  # 排行榜推送间隔(秒)       # 排行榜推送间隔(分钟)
+    'feishu_app_id': 'cli_aa98546becf8dbda',
+    'feishu_app_secret': 'oPG0ide5BOQE8IT7lJm0vbynRyyCXYcQ',
     'theme': 'light',  # 'light' or 'dark'
 }
 
