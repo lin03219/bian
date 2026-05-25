@@ -13,7 +13,37 @@ def _fmt_pct(v):
         return '-'
     return f'{v:+.1f}%'
 
+
+def _make_summary(score, reasons_bull, reasons_bear):
+    """G版：根据评分和因子生成简短判断"""
+    if score >= 6:
+        return "多指标共振，趋势多"
+    elif score >= 4:
+        bull_short = reasons_bull[0] if reasons_bull else "放量突破"
+        return f"{bull_short[:8]}，做多信号"
+    elif score >= 2:
+        if reasons_bull:
+            return f"{reasons_bull[0][:8]}，偏多"
+        return "短期偏多，可关注"
+    elif score >= 1:
+        return "略偏多，轻仓试"
+    elif score <= -6:
+        return "全面看空，回避"
+    elif score <= -4:
+        bear_short = reasons_bear[0] if reasons_bear else "趋势走弱"
+        return f"{bear_short[:8]}，离场信号"
+    elif score <= -2:
+        if reasons_bear:
+            return f"{reasons_bear[0][:8]}，偏空"
+        return "短期偏空，减仓"
+    elif score <= -1:
+        return "略偏空，观望"
+    else:
+        return "无信号，继续等"
+
+
 class Notifier:
+
     def __init__(self, config):
         self.channel = config.get('channel', 'dingtalk')
         self.webhook_url = config.get('webhook_url', '')
@@ -107,14 +137,8 @@ class Notifier:
             if sig.get('btc_corr', 0) and sig['btc_corr'] > 0.7:
                 continue
             coin = sig.get('coin', '')
-            c1 = sig.get('change_1h')
-            c4 = sig.get('change_4h')
-            amp = sig.get('amplitude', 0)
-            pct = sig.get('change_pct', 0)
-            analysis = sig.get('analysis', '')
             def _cp(v):
                 if v is None: return ('-', '#000000')
-                s = f'{v:+.1f}%'
                 return (s, '#00AA00' if v > 0 else '#DD0000' if v < 0 else '#000000')
             s1, clr1 = _cp(c1)
             s4, clr4 = _cp(c4)
@@ -278,18 +302,7 @@ class Notifier:
             if sig.get('btc_corr', 0) and sig['btc_corr'] > 0.7:
                 continue
             coin = sig.get('coin', '')
-            c1 = sig.get('change_1h')
-            c4 = sig.get('change_4h')
-            amp = sig.get('amplitude', 0)
-            pct = sig.get('change_pct', 0)
-            analysis = sig.get('analysis', '')
             
-            def _fc(v):
-                if v is None: return '-'
-                s = f'{v:+.1f}%'
-                if v > 0: return f'\u25b2{s}'
-                elif v < 0: return f'\u25bc{s}'
-                return s
             
             score = sig.get('score', 0)
             verdict = sig.get('verdict', '')
@@ -299,7 +312,8 @@ class Notifier:
             reasons_neutral = sig.get('reasons_neutral', [])
             entry_lines = []
             # 只显示：币名 + 1h/4h + 评分
-            entry_lines.append("<font color='#0066FF'>●</font> **{} [{:+d}]**  {} {}".format(coin, score, _fc(c1), _fc(c4)))
+            summary = _make_summary(score, reasons_bull, reasons_bear)
+            entry_lines.append("<font color='#0066FF'>\u25cf</font> **{} [{:+d}]** {}".format(coin, score, summary))
             entry = chr(10).join(entry_lines)
 
 
