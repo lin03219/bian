@@ -75,7 +75,7 @@ def analyze_sectors(coins):
                 continue
             chg = c.get('change_24h', 0) or 0
             vol = c.get('volume_24h', 0) or 0
-            if -3 < chg < 3 and vol >= 500000:
+            if -2 < chg < 5 and vol >= 200000:
                 laggards.append((sym, chg, vol))
         # Enhance laggards with deep data scoring
         import collector as _coll
