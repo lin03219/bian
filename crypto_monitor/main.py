@@ -35,6 +35,9 @@ class MonitorWorker(QThread):
         self.notifier = Notifier(self.cfg)
 
     def run(self):
+        import time as _t2
+        _t_total = _t2.time()
+        _t1 = _t_total
         try:
             self.status_update.emit('正在拉取币安数据...')
             coins = collector.get_top_coins(200)
@@ -45,14 +48,20 @@ class MonitorWorker(QThread):
             try:
                 mcaps = collector.get_market_caps()
                 coins = [c for c in coins if mcaps.get(c['symbol'].upper(), 0) <= 400_000_000]
-                self.status_update.emit(f'市值过滤后剩余 {len(coins)} 币')
+                self.status_update.emit(f'市值过滤后剩余 {len(coins)} 币 | [计时] 拉取+{_t2.time()-_t1:.1f}s')
+                _t1 = _t2.time()
             except:
                 pass
             global_data = collector.get_global_data()
             trending = collector.get_trending(coins)
-            self.status_update.emit('正在分析信号...')
+            self.status_update.emit('正在分析信号...' + f' | [计时] 准备{_t2.time()-_t1:.1f}s')
+            _t1 = _t2.time()
             signals = self.detector.detect_all(coins, global_data, trending)
+            self.status_update.emit(f'[计时] 信号检测: {_t2.time()-_t1:.1f}s')
+            _t1 = _t2.time()
+            self.status_update.emit(f'[??] ????: {_t2.time()-_t1:.1f}s')
             # 获取 1h/4h 涨跌幅
+            _t1 = _t2.time()
             for s in signals[:15]:
                 sym = s.get('coin', '')
                 if sym not in ('MARKET', 'ALTS', 'BTC.D'):
@@ -72,8 +81,10 @@ class MonitorWorker(QThread):
                     except:
                         pass
             # 获取合约持仓量判断方向
+            self.status_update.emit(f'[计时] K线采集: {_t2.time()-_t1:.1f}s')
+            _t1 = _t2.time()
             # 获取合约持仓量（内部使用，不展示）
-            for s in signals[:20]:
+            for s in signals[:15]:
                 sym = s.get('coin', '')
                 if sym in ('MARKET', 'ALTS', 'BTC.D'):
                     continue
@@ -81,6 +92,7 @@ class MonitorWorker(QThread):
                     oi_val, oi_chg = collector.get_open_interest(sym)
                     pct = s.get('change_pct', 0)
                     if oi_chg is not None:
+                        s['oi_chg_pct'] = oi_chg
                         if pct > 0 and oi_chg > 0:
                             s['oi_label'] = '多头加仓'
                         elif pct > 0 and oi_chg < 0:
@@ -122,16 +134,14 @@ class MonitorWorker(QThread):
                         s['ma_above'] = above; s['ma_total'] = len(mas)
                 except:
                     pass
-                # Contract premium + funding rate (1 API call total)
+                # Contract: premium + funding + index (1 API call)
                 try:
                     spot_p = s.get('spot_price') or 0
-                    mark_p, spot_prem, fr2 = collector.get_arb_metrics(sym, spot_p)
+                    mark_p, spot_prem, fr2, idx_prem = collector.get_arb_metrics(sym, spot_p)
                     s['mark_price'] = mark_p
                     s['spot_premium'] = spot_prem
                     s['funding_rate'] = fr2
-                    # premium from get_premium_index separately (index-based)
-                    prem_idx = collector.get_premium_index(sym)
-                    s['premium'] = prem_idx
+                    s['premium'] = idx_prem
                 except:
                     pass
                 # Active buy/sell (1wgt)
@@ -164,13 +174,17 @@ class MonitorWorker(QThread):
                 except:
                     pass
             
+            self.status_update.emit(f'[计时] 深分数据采集: {_t2.time()-_t1:.1f}s')
+            _t1 = _t2.time()
             # 综合数据分析，生成总结标签
-            for s in signals[:20]:
+            for s in signals[:15]:
                 _analyze_signal_detailed(s)
             
             # 板块分析
             try:
                 sector_signals = sector.analyze_sectors(coins)
+                self.status_update.emit(f'[计时] 板块分析: {_t2.time()-_t1:.1f}s')
+                _t1 = _t2.time()
                 for ss in sector_signals[:8]:
                     signals.append({
                         'type': 'sector',
@@ -203,12 +217,12 @@ class MonitorWorker(QThread):
                     self.status_update.emit(f'推送 {len(signals)} 条信号到飞书...')
                     ok, msg = self.notifier.send_batch(signals)
                     if ok:
-                        self.status_update.emit('推送完成')
+                        self.status_update.emit(f'推送完成 (总耗时{_t2.time()-_t_total:.1f}s)')
                     else:
                         self.status_update.emit(f'推送失败: {msg}')
                     # ????: ????, ??????
             now = datetime.now().strftime('%H:%M:%S')
-            msg = f'{now}  检测到 {len(signals)} 条信号' if signals else f'{now}  监控正常，暂无异常信号'
+            msg = f'{now}  检测到 {len(signals)} 条信号 | 总耗时{_t2.time()-_t_total:.1f}s' if signals else f'{now}  监控正常，暂无异常信号 | 总耗时{_t2.time()-_t_total:.1f}s'
             self.status_update.emit(msg)
         except Exception as e:
             self.status_update.emit(f'错误: {e}')
@@ -410,10 +424,14 @@ def _compute_unified_score(d):
         macd_val, macd_sig, macd_hist, amp, obv_val,
         active_buy_ratio, premium, funding_rate, oi_chg_pct
     """
-    change_24h = d.get("change_24h", 0) or 0
-    c1 = d.get("c1")
-    c4 = d.get("c4")
-    rsi = d.get("rsi")
+    def _num(v):
+        if v is None: return None
+        try: return float(v)
+        except: return None
+    change_24h = _num(d.get("change_24h", 0)) or 0
+    c1 = _num(d.get("c1"))
+    c4 = _num(d.get("c4"))
+    rsi = _num(d.get("rsi"))
     mas_dict = d.get("mas_dict", {})
     price = d.get("price", 0)
     ob_label = d.get("ob_label", "")
@@ -425,14 +443,15 @@ def _compute_unified_score(d):
     macd_val = d.get("macd_val")
     macd_sig = d.get("macd_sig")
     macd_hist = d.get("macd_hist")
-    amp = d.get("amp", 0) or 0
+    amp = _num(d.get("amp", 0)) or 0
     obv_val = d.get("obv_val")
     if isinstance(obv_val, (tuple, list)):
         obv_val = obv_val[0] if obv_val else None
-    active_buy_ratio = d.get("active_buy_ratio")
-    premium = d.get("premium")
-    funding_rate = d.get("funding_rate")
-    oi_chg_pct = d.get("oi_chg_pct")
+    obv_val = _num(obv_val)
+    active_buy_ratio = _num(d.get("active_buy_ratio"))
+    premium = _num(d.get("premium"))
+    funding_rate = _num(d.get("funding_rate"))
+    oi_chg_pct = _num(d.get("oi_chg_pct"))
 
     score = 0
     reasons_bull = []

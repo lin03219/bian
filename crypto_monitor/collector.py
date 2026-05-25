@@ -4,6 +4,18 @@
 """
 import time
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# Reusable session for connection pooling (2-3x faster)
+_session = None
+def _get_session():
+    global _session
+    if _session is None:
+        _session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=20, pool_maxsize=50, max_retries=Retry(total=0))
+        _session.mount('https://', adapter)
+    return _session
 from config import get_config
 
 def _get_proxy():
@@ -46,7 +58,7 @@ _BINANCE_WEIGHTS = {
 def _get_binance(path, params=None):
     url = f"{BINANCE_URL}{path}"
     headers = {'accept': 'application/json'}
-    resp = requests.get(url, params=params, headers=headers, timeout=15, proxies=_get_proxy())
+    resp = _get_session().get(url, params=params, headers=headers, timeout=10, proxies=_get_proxy())
     # Track weight
     w = _BINANCE_WEIGHTS.get(path, 1)
     _track_weight(w)
@@ -149,7 +161,7 @@ def get_global_data():
 
 def _get_fear_greed():
     try:
-        resp = requests.get('https://api.alternative.me/fng/', timeout=3, proxies=_get_proxy())
+        resp = _get_session().get('https://api.alternative.me/fng/', timeout=3, proxies=_get_proxy())
         data = resp.json()
         if data.get('data'):
             val = data['data'][0].get('value', '0')
@@ -172,7 +184,7 @@ def get_open_interest(symbol):
     global _prev_oi
     _track_weight(1)  # fapi/openInterest
     try:
-        resp = requests.get(
+        resp = _get_session().get(
             f'https://fapi.binance.com/fapi/v1/openInterest',
             params={'symbol': symbol + 'USDT'},
             timeout=5, proxies=_get_proxy()
@@ -400,7 +412,7 @@ def get_funding_rate(symbol):
     """获取永续合约资金费率"""
     _track_weight(1)
     try:
-        resp = requests.get(
+        resp = _get_session().get(
             'https://fapi.binance.com/fapi/v1/premiumIndex',
             params={'symbol': symbol + 'USDT'},
             timeout=5, proxies=_get_proxy()
@@ -470,10 +482,10 @@ def get_market_caps():
     result = {}
     try:
         for page in [1, 2]:
-            resp = requests.get(
+            resp = _get_session().get(
                 'https://api.coingecko.com/api/v3/coins/markets',
                 params={'vs_currency': 'usd', 'order': 'volume_desc', 'per_page': 250, 'page': page, 'sparkline': 'false'},
-                timeout=15, proxies=_get_proxy()
+                timeout=10, proxies=_get_proxy()
             )
             if resp.status_code != 200:
                 break
@@ -491,12 +503,12 @@ def get_market_caps():
 def get_long_short_ratio(symbol):
     try:
         _track_weight(2)  # 2 fapi calls
-        global_data = requests.get(
+        global_data = _get_session().get(
             'https://fapi.binance.com/futures/data/globalLongShortAccountRatio',
             params={'symbol': symbol + 'USDT', 'period': '5m', 'limit': 1},
             timeout=5, proxies=_get_proxy()
         ).json()
-        top_data = requests.get(
+        top_data = _get_session().get(
             'https://fapi.binance.com/futures/data/topLongShortAccountRatio',
             params={'symbol': symbol + 'USDT', 'period': '5m', 'limit': 1},
             timeout=5, proxies=_get_proxy()
@@ -574,7 +586,7 @@ def calc_obv(closes, volumes):
 def get_liquidation_heatmap():
     """全市场爆仓数据（近24h）"""
     try:
-        resp = requests.get('https://fapi.binance.com/futures/data/globalLongShortAccountRatio',
+        resp = _get_session().get('https://fapi.binance.com/futures/data/globalLongShortAccountRatio',
             params={'symbol': 'BTCUSDT', 'period': '5m', 'limit': 1}, timeout=5, proxies=_get_proxy())
         # This is approximate; full liquidation data requires multiple calls
         return None
@@ -606,7 +618,7 @@ def get_active_buy_sell_ratio(symbol):
 def get_premium_index(symbol):
     _track_weight(1)
     try:
-        resp = requests.get(
+        resp = _get_session().get(
             'https://fapi.binance.com/fapi/v1/premiumIndex',
             params={'symbol': symbol + 'USDT'},
             timeout=5, proxies=_get_proxy()
@@ -624,24 +636,30 @@ def get_premium_index(symbol):
         return None
 
 def get_arb_metrics(symbol, spot_price=0):
-    """????: ?? (mark_price, spot_vs_mark_premium, funding_rate)"""
+    """????: ?? (mark_price, spot_vs_mark_premium, funding_rate, index_premium)"""
+    _track_weight(1)
     try:
-        resp = requests.get(
+        resp = _get_session().get(
             "https://fapi.binance.com/fapi/v1/premiumIndex",
             params={"symbol": symbol + "USDT"},
             timeout=5, proxies=_get_proxy()
         )
+        if resp.status_code != 200:
+            return 0, 0, None, None
         data = resp.json()
         mark = float(data.get("markPrice", 0))
+        idx = float(data.get("indexPrice", 0))
         fr = float(data.get("lastFundingRate", 0)) * 100
+        # Index premium: mark vs index
+        idx_prem = ((mark / idx - 1) * 100) if idx > 0 else None
+        # Spot premium: spot vs mark
         if mark > 0 and spot_price > 0:
-            premium = (spot_price / mark - 1) * 100  # + = ????????????
+            premium = (spot_price / mark - 1) * 100  # + = ????
         else:
             premium = 0
-        _track_weight(1)
-        return mark, premium, fr
+        return mark, premium, fr, idx_prem
     except:
-        return 0, 0, 0
+        return 0, 0, None, None
 def get_kline_volumes(symbol, interval="1h", limit=100):
     """获取K线成交量列表"""
     kls = _get_binance("/klines", {"symbol": symbol + "USDT", "interval": interval, "limit": str(limit)})
