@@ -235,7 +235,7 @@ class Notifier:
         if sector_sigs:
             lines.append('---')
             lines.append('### 📈 板块热力')
-            for ss in sector_sigs[:8]:
+            for ss in sector_sigs[:5]:
                 avg = ss['avg_pct']
                 name = ss['name']
                 cnt = ss['count']
@@ -356,7 +356,7 @@ class Notifier:
         if sector_sigs:
             md_lines.append('---')
             md_lines.append('**\U0001f4c8 板块热力**')
-            for ss in sector_sigs[:8]:
+            for ss in sector_sigs[:5]:
                 avg = ss['avg_pct']
                 name = ss['name']
                 cnt = ss['count']
@@ -371,7 +371,7 @@ class Notifier:
                 laggards = ss.get("laggards", [])
                 if laggards:
                     ls = ""
-                    for sym, chg, vol in laggards[:5]:
+                    for sym, chg, vol in laggards[:2]:
                         lc = "#00AA00" if chg > 0 else ("#DD0000" if chg < 0 else "#888888")
                         ls += f" <font color='{lc}'>{sym}({chg:+.1f}%)"
                     md_lines.append(f"  💤补涨候选:{ls}")
