@@ -120,9 +120,10 @@ class MonitorWorker(QThread):
                         s['ma_above'] = above; s['ma_total'] = len(mas)
                 except:
                     pass
-                # Contract premium (1wgt)
+                # Contract premium + funding rate (1wgt total)
                 try:
                     s['premium'] = collector.get_premium_index(sym)
+                    s['funding_rate'] = collector.get_funding_rate(sym)
                 except:
                     pass
                 # Active buy/sell (1wgt)

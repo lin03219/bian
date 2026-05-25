@@ -42,6 +42,32 @@ def _make_summary(score, reasons_bull, reasons_bear):
         return "无信号，继续等"
 
 
+def _check_accumulation(sig):
+    """C版：检测庄家建仓信号 (≥3条触发)"""
+    pct = sig.get("change_pct", 0)
+    oi = sig.get("oi_label", "")
+    lt = sig.get("lt_label", "")
+    ob = sig.get("ob_label", "")
+    ws = sig.get("wall_score", 0)
+    fr = sig.get("funding_rate")
+    ls = sig.get("ls_label", "")
+    hints = []
+    score = 0
+    if oi in ("多头加仓", "空头平仓") and -2 < pct < 2:
+        hints.append("OI↑"); score += 1
+    if lt == "大单净买":
+        hints.append("大单买"); score += 1
+    if ob == "买盘强" or ws >= 1:
+        hints.append("盘口托"); score += 1
+    if fr is not None and fr < -0.005 and pct > -3:
+        hints.append("费率负"); score += 1
+    if ls and "多" in ls:
+        hints.append(ls); score += 1
+    if score >= 3:
+        return " | 🏗建仓: " + "/".join(hints)
+    return ""
+
+
 class Notifier:
 
     def __init__(self, config):
@@ -313,7 +339,8 @@ class Notifier:
             entry_lines = []
             # 只显示：币名 + 1h/4h + 评分
             summary = _make_summary(score, reasons_bull, reasons_bear)
-            entry_lines.append("<font color='#0066FF'>\u25cf</font> **{} [{:+d}]** {}".format(coin, score, summary))
+            accu = _check_accumulation(sig)
+            entry_lines.append("<font color='#0066FF'>\u25cf</font> **{} [{:+d}]** {}{}".format(coin, score, summary, accu))
             entry = chr(10).join(entry_lines)
 
 
