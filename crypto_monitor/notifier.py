@@ -263,9 +263,7 @@ class Notifier:
         ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         md_lines = []
         overview = ''
-        bullish_items = []
-        bearish_items = []
-        neutral_items = []
+        print(f'[FEISHU DEBUG] overview init done')
         
         for sig in signals[:15]:
             typ = sig.get('type', '')
@@ -300,41 +298,18 @@ class Notifier:
             reasons_neutral = sig.get('reasons_neutral', [])
             entry_lines = []
             # 只显示：币名 + 1h/4h + 评分
-            score_str = f'评分{score:+d}' if score != 0 else '评分0'
-            entry_lines.append('**{}**  1h:{}  4h:{}  {}'.format(coin, _fc(c1), _fc(c4), score_str))
+            entry_lines.append('**{} [{:+d}]**  {} {}'.format(coin, score, _fc(c1), _fc(c4)))
             entry = chr(10).join(entry_lines)
 
 
-            if pct > 2:
-                bullish_items.append((amp, entry))
-            elif pct < -2:
-                bearish_items.append((amp, entry))
-            else:
-                neutral_items.append((amp, entry))
+            all_signals.append((score, entry))
         
         md_lines.append(f'> {overview}')
         md_lines.append('')
-        
-        if bullish_items:
-            md_lines.append('**\u2705 利好**')
-            bullish_items.sort(key=lambda x: x[0], reverse=True)
-            for _, item in bullish_items:
-                md_lines.append(f'- {item}')
-            md_lines.append('')
-        if bearish_items:
-            md_lines.append('**\u274c 利空**')
-            bearish_items.sort(key=lambda x: x[0], reverse=True)
-            for _, item in bearish_items:
-                md_lines.append(f'- {item}')
-            md_lines.append('')
-        if neutral_items:
-            md_lines.append('**\u2796 震荡**')
-            neutral_items.sort(key=lambda x: x[0], reverse=True)
-            for _, item in neutral_items:
-                md_lines.append(f'- {item}')
-            md_lines.append('')
-        
-        # Sector
+        all_signals.sort(key=lambda x: x[0], reverse=True)
+        for _, entry in all_signals:
+            md_lines.append(entry)
+        md_lines.append('')
         sector_sigs = [s for s in signals if s.get('type') == 'sector']
         if sector_sigs:
             md_lines.append('---')
@@ -380,6 +355,7 @@ class Notifier:
         try:
             proxy_url = cfg.get('proxy', '')
             proxies = {'http': proxy_url, 'https': proxy_url} if proxy_url else None
+            print(f"[FEISHU DEBUG] posting to feishu, md_content({len(md_content)} chars): {md_content[:100]}")
             resp = requests.post(url, json=payload, timeout=15, proxies=proxies)
             result = resp.json()
             code = result.get('code') or result.get('StatusCode')
