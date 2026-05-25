@@ -120,36 +120,38 @@ class MonitorWorker(QThread):
                         s['ma_above'] = above; s['ma_total'] = len(mas)
                 except:
                     pass
-                # Active buy/sell
+                # Contract premium (1wgt)
+                try:
+                    s['premium'] = collector.get_premium_index(sym)
+                except:
+                    pass
+                # Active buy/sell (1wgt)
                 try:
                     abr, abl, _, _ = collector.get_active_buy_sell_ratio(sym)
                     s['active_buy_ratio'] = abr
                 except:
                     pass
-                # Contract premium
-                try:
-                    s['premium'] = collector.get_premium_index(sym)
-                except:
-                    pass
-                try:
-                    ratio, ob_label = collector.get_orderbook_ratio(sym)
-                    s['ob_ratio'] = ratio
-                    s['ob_label'] = ob_label
-                except:
-                    pass
-
-                # BTC correlation (cached)
-                try:
-                    corr = collector.get_btc_correlation(sym)
-                    s['btc_corr'] = corr
-                except:
-                    pass
-                # Long/short ratio
+                # Long/short ratio (2wgt)
                 try:
                     top_l, glb_l, ls_label = collector.get_long_short_ratio(sym)
                     s['ls_top'] = top_l
                     s['ls_global'] = glb_l
                     s['ls_label'] = ls_label
+                except:
+                    pass
+                # BTC correlation (~1wgt, cached)
+                try:
+                    corr = collector.get_btc_correlation(sym)
+                    s['btc_corr'] = corr
+                except:
+                    pass
+                # Orderbook 500??? (25wgt) -- ??????
+                try:
+                    ratio, ob_label, cum_imb, wall_score = collector.get_orderbook_deep(sym)
+                    s['ob_ratio'] = ratio
+                    s['ob_label'] = ob_label
+                    s['cum_imbalance'] = cum_imb
+                    s['wall_score'] = wall_score
                 except:
                     pass
             
@@ -460,6 +462,19 @@ def _analyze_signal_detailed(sig):
             score -= 1; reasons_bear.append('盘口卖盘压制，上方有阻力')
         else:
             reasons_neutral.append('盘口买卖均衡')
+    # 挂单墙分析 (500档)
+    ws = sig.get('wall_score', 0)
+    if ws == 2:
+        score += 2; reasons_bull.append('买盘挂单墙远厚于卖盘，强力支撑')
+    elif ws == 1:
+        score += 1; reasons_bull.append('买盘挂单墙略厚，偏多')
+    elif ws == -2:
+        score -= 2; reasons_bear.append('卖盘挂单墙远厚于买盘，强力压制')
+    elif ws == -1:
+        score -= 1; reasons_bear.append('卖盘挂单墙略厚，偏空')
+    ci = sig.get('cum_imbalance', 1.0)
+    if ci > 1.5:
+        score += 1; reasons_bull.append(f'近端买卖失衡比{ci:.1f}，买盘活跃')
     
     # Large trades
     if lt:

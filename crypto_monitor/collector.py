@@ -210,6 +210,65 @@ def get_orderbook_ratio(symbol, limit=50):
         return 1.0, '-'
 
 
+def get_orderbook_deep(symbol):
+    """500?????: ?? ratio, label, bid_walls, ask_walls, cum_imbalance, wall_score"""
+    try:
+        data = _get_binance('/depth', {'symbol': symbol + 'USDT', 'limit': '500'})
+        _track_weight(20)  # Extra 20 for 500-level (total 25 = 5 base + 20)
+        bids_raw = [(float(b[0]), float(b[1])) for b in data.get('bids', [])]
+        asks_raw = [(float(a[0]), float(a[1])) for a in data.get('asks', [])]
+        
+        # Total depth
+        bids_total = sum(qty for _, qty in bids_raw)
+        asks_total = sum(qty for _, qty in asks_raw)
+        if asks_total > 0:
+            ratio = round(bids_total / asks_total, 2)
+        else:
+            ratio = 1.0
+        
+        # Find walls: largest single orders by notional (price * qty)
+        bid_walls = sorted([(p * q, p, q) for p, q in bids_raw], reverse=True)[:3]
+        ask_walls = sorted([(p * q, p, q) for p, q in asks_raw], reverse=True)[:3]
+        
+        # Cumulative imbalance: weighted by distance from mid price
+        mid = (bids_raw[0][0] + asks_raw[0][0]) / 2 if bids_raw and asks_raw else 0
+        if mid > 0:
+            bid_pressure = sum(qty * (1 - (mid - p) / mid * 2) for p, qty in bids_raw[:50] if p > mid * 0.9)
+            ask_pressure = sum(qty * (1 - (p - mid) / mid * 2) for p, qty in asks_raw[:50] if p < mid * 1.1)
+            cum_imbalance = round(bid_pressure / max(ask_pressure, 1), 2)
+        else:
+            cum_imbalance = 1.0
+        
+        # Wall score: compare largest bid wall vs largest ask wall
+        max_bid_wall = bid_walls[0][0] if bid_walls else 0
+        max_ask_wall = ask_walls[0][0] if ask_walls else 0
+        if max_ask_wall > 0:
+            wall_ratio = max_bid_wall / max_ask_wall
+        else:
+            wall_ratio = 1.0
+        
+        # Wall score: -2 to +2
+        wall_score = 0
+        if wall_ratio > 2.0:
+            wall_score = 2
+        elif wall_ratio > 1.5:
+            wall_score = 1
+        elif wall_ratio < 0.5:
+            wall_score = -2
+        elif wall_ratio < 0.7:
+            wall_score = -1
+        
+        # Overall label
+        if ratio >= 1.3:
+            label = '???'
+        elif ratio <= 0.7:
+            label = '???'
+        else:
+            label = '??'
+        
+        return ratio, label, cum_imbalance, wall_score
+    except:
+        return 1.0, '-', 1.0, 0
 def get_large_trades(symbol, min_notional=10000):
     """大单成交统计: 返回(买量,卖量,标签)"""
     try:
