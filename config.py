@@ -31,6 +31,13 @@ DEFAULT_CONFIG = {
     'feishu_app_id': 'cli_aa98546becf8dbda',
     'feishu_app_secret': 'oPG0ide5BOQE8IT7lJm0vbynRyyCXYcQ',
     'theme': 'light',  # 'light' or 'dark'
+    'top_coins_count': 200,
+    'min_volume_usdt': 500000,
+    'max_market_cap': 400000000,
+    'deep_analysis_count': 10,
+    'feishu_display_count': 15,
+    'btc_corr_filter': 0.7,
+    'min_score_filter': 1,
 }
 
 def load_config():

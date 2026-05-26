@@ -99,7 +99,9 @@ def can_margin_trade(symbol, force_refresh=False):
 def get_top_coins(n=100):
     data = _get_binance('/ticker/24hr')
     usdt_pairs = [d for d in data if d['symbol'].endswith('USDT') and not d['symbol'].endswith('UPUSDT') and not d['symbol'].endswith('DOWNUSDT')]
-    usdt_pairs = [d for d in usdt_pairs if float(d.get('quoteVolume', 0)) >= 500000 and _is_spot(d['symbol'])]
+    from config import get_config as _gcfg
+    _mv = _gcfg().get("min_volume_usdt", 500000)
+    usdt_pairs = [d for d in usdt_pairs if float(d.get("quoteVolume", 0)) >= _mv and _is_spot(d["symbol"])]
     usdt_pairs.sort(key=lambda x: float(x.get('quoteVolume', 0)), reverse=True)
     coins = []
     for c in usdt_pairs[:n]:
@@ -136,7 +138,9 @@ def get_trending(coins=None):
         return result
     data = _get_binance('/ticker/24hr')
     usdt_pairs = [d for d in data if d['symbol'].endswith('USDT') and not d['symbol'].endswith('UPUSDT') and not d['symbol'].endswith('DOWNUSDT')]
-    usdt_pairs = [d for d in usdt_pairs if float(d.get('quoteVolume', 0)) >= 500000 and _is_spot(d['symbol'])]
+    from config import get_config as _gcfg
+    _mv = _gcfg().get("min_volume_usdt", 500000)
+    usdt_pairs = [d for d in usdt_pairs if float(d.get("quoteVolume", 0)) >= _mv and _is_spot(d["symbol"])]
     usdt_pairs.sort(key=lambda x: float(x.get('priceChangePercent', 0)), reverse=True)
     coins = []
     for idx, c in enumerate(usdt_pairs[:20]):

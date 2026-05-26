@@ -15,32 +15,20 @@ def _fmt_pct(v):
 
 
 def _make_summary(score, reasons_bull, reasons_bear):
-    """G版：根据评分和因子生成简短判断"""
     if score >= 6:
-        return "多指标共振，趋势多"
-    elif score >= 4:
-        bull_short = reasons_bull[0] if reasons_bull else "放量突破"
-        return f"{bull_short[:8]}，做多信号"
-    elif score >= 2:
-        if reasons_bull:
-            return f"{reasons_bull[0][:8]}，偏多"
-        return "短期偏多，可关注"
+        return "量价齐升，顺势"
+    elif score >= 3:
+        return "多头占优，可跟"
     elif score >= 1:
-        return "略偏多，轻仓试"
+        return "偏多但不够强"
     elif score <= -6:
-        return "全面看空，回避"
-    elif score <= -4:
-        bear_short = reasons_bear[0] if reasons_bear else "趋势走弱"
-        return f"{bear_short[:8]}，离场信号"
-    elif score <= -2:
-        if reasons_bear:
-            return f"{reasons_bear[0][:8]}，偏空"
-        return "短期偏空，减仓"
+        return "全面走坏，远离"
+    elif score <= -3:
+        return "空头控盘，回避"
     elif score <= -1:
-        return "略偏空，观望"
+        return "走弱了，观望"
     else:
-        return "无信号，继续等"
-
+        return "横盘没方向"
 
 def _check_accumulation(sig):
     """C版：检测庄家建仓信号 (≥3条触发)"""
@@ -148,22 +136,29 @@ class Notifier:
         bearish_sigs = []
         neutral_sigs = []
         overview_line = ''
-        for sig in signals[:15]:
-            typ = sig.get('type', '')
-            if typ == 'market_overview':
+        # 先提取概览
+        for sig in signals:
+            if sig.get('type', '') == 'market_overview':
                 bullish = sig.get('bullish', 0)
                 bearish = sig.get('bearish', 0)
                 fg = sig.get('fear_greed', 50)
                 fg_label = '恐慌' if fg <= 40 else ('中性' if fg <= 60 else '贪婪')
                 fg_emoji = '😱' if fg <= 40 else ('😐' if fg <= 60 else '😈')
                 overview_line = f'利好{bullish} | 利空{bearish} | 恐惧贪婪 {fg}{fg_emoji}'
-                continue
-            if typ == 'sector':
+                break
+        
+        dt_display = get_config().get('feishu_display_count', 15)
+        dt_count = 0
+        for sig in signals:
+            typ = sig.get('type', '')
+            if typ in ('market_overview', 'sector'):
                 continue
             if typ not in ('price_surge', 'price_drop', 'volume_spike', 'fear_greed', 'trending_new'):
                 continue
-            if sig.get('btc_corr', 0) and sig['btc_corr'] > 0.7:
+            if sig.get('btc_corr', 0) and sig['btc_corr'] > get_config().get('btc_corr_filter', 0.7):
                 continue
+            if dt_count >= dt_display:
+                break
             coin = sig.get('coin', '')
             def _cp(v):
                 if v is None: return ('-', '#000000')
@@ -317,18 +312,24 @@ class Notifier:
         overview = ''
         print(f'[FEISHU DEBUG] overview init done')
         
-        all_signals = []
-        for sig in signals[:15]:
-            typ = sig.get('type', '')
-            if typ == 'market_overview':
+        # 先提取概览，再筛选有效币种信号
+        for sig in signals:
+            if sig.get('type', '') == 'market_overview':
                 bl = sig.get('bullish', 0)
                 br = sig.get('bearish', 0)
                 overview = f'利好{bl} | 利空{br}'
+                break
+        
+        display_count = get_config().get('feishu_display_count', 15)
+        all_signals = []
+        for sig in signals:
+            typ = sig.get('type', '')
+            if typ in ('market_overview', 'sector'):
                 continue
-            if typ == 'sector':
+            if sig.get('btc_corr', 0) and sig['btc_corr'] > get_config().get('btc_corr_filter', 0.7):
                 continue
-            if sig.get('btc_corr', 0) and sig['btc_corr'] > 0.7:
-                continue
+            if len(all_signals) >= display_count:
+                break
             coin = sig.get('coin', '')
             
             
@@ -349,7 +350,7 @@ class Notifier:
             entry = chr(10).join(entry_lines)
 
 
-            if score >= 1:
+            if score >= get_config().get('min_score_filter', 1):
                 all_signals.append((score, entry))
         
         md_lines.append(f'> {overview}')

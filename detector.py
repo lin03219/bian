@@ -7,8 +7,8 @@ from datetime import datetime, timedelta
 class SignalDetector:
     def __init__(self, config):
         self.cfg = config
-        self.price_threshold = config.get('price_change_threshold_pct', 5.0)
-        self.volume_threshold = config.get('volume_change_threshold_pct', 200.0)
+        self.price_threshold = config.get('price_change_threshold_pct', 3.5)
+        self.volume_threshold = config.get('volume_change_threshold_pct', 100.0)
         self.prev_prices = {}
         self.prev_volumes = {}
 

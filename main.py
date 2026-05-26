@@ -45,14 +45,14 @@ class MonitorWorker(QThread):
         _t1 = _t_total
         try:
             self.status_update.emit('正在拉取币安数据...')
-            coins = collector.get_top_coins(200)
+            coins = collector.get_top_coins(self.cfg.get('top_coins_count', 200))
             # 过滤黑名单
             bl = self.cfg.get('blacklist', [])
             coins = [c for c in coins if c['symbol'].upper() not in [b.upper() for b in bl]]
             # 过滤市值>10亿的币种
             try:
                 mcaps = collector.get_market_caps()
-                coins = [c for c in coins if mcaps.get(c['symbol'].upper(), 0) <= 400_000_000]
+                coins = [c for c in coins if mcaps.get(c['symbol'].upper(), 999999999999) <= self.cfg.get('max_market_cap', 400000000)]
                 self.status_update.emit(f'市值过滤后剩余 {len(coins)} 币 | [计时] 拉取+{_t2.time()-_t1:.1f}s')
                 _t1 = _t2.time()
             except:
@@ -67,7 +67,7 @@ class MonitorWorker(QThread):
             self.status_update.emit(f'[??] ????: {_t2.time()-_t1:.1f}s')
             # 获取 1h/4h 涨跌幅
             _t1 = _t2.time()
-            for s in signals[:15]:
+            for s in signals:
                 sym = s.get('coin', '')
                 if sym not in ('MARKET', 'ALTS', 'BTC.D'):
                     try:
@@ -89,7 +89,7 @@ class MonitorWorker(QThread):
             self.status_update.emit(f'[计时] K线采集: {_t2.time()-_t1:.1f}s')
             _t1 = _t2.time()
             # 获取合约持仓量（内部使用，不展示）
-            for s in signals[:15]:
+            for s in signals:
                 sym = s.get('coin', '')
                 if sym in ('MARKET', 'ALTS', 'BTC.D'):
                     continue
@@ -110,8 +110,8 @@ class MonitorWorker(QThread):
                     pass
             
             corr_cache = {}
-            sigs_deep = [s for s in signals[:10] if s.get("coin","") not in ("MARKET","BTC.D")]
-            for sym_idx, s in enumerate(signals[:10]):
+            sigs_deep = [s for s in signals[:self.cfg.get('deep_analysis_count', 10)] if s.get("coin","") not in ("MARKET","BTC.D")]
+            for sym_idx, s in enumerate(signals[:self.cfg.get('deep_analysis_count', 10)]):
                 sym = s.get('coin', '')
                 if sym in ('MARKET', 'BTC.D'):
                     continue
@@ -182,8 +182,8 @@ class MonitorWorker(QThread):
             
             self.status_update.emit(f'[计时] 深分数据采集: {_t2.time()-_t1:.1f}s')
             _t1 = _t2.time()
-            # 综合数据分析，生成总结标签
-            for s in signals[:15]:
+            # 综合数据分析，生成总结标签（对所有币种信号评分）
+            for s in signals:
                 try:
                     _analyze_signal_detailed(s)
                 except Exception as _e:
@@ -280,16 +280,6 @@ class SettingsDialog(QDialog):
         f3.addRow('HTTP 代理:', self.proxy_edit)
         g3.setLayout(f3); lo.addWidget(g3)
 
-        g2 = QGroupBox('监控参数')
-        f2 = QFormLayout()
-        self.pc = QDoubleSpinBox(); self.pc.setRange(1,50); self.pc.setSuffix(' %')
-        f2.addRow('价格异动阈值:', self.pc)
-        self.vc = QDoubleSpinBox(); self.vc.setRange(50,1000); self.vc.setSuffix(' %')
-        f2.addRow('成交量异动阈值:', self.vc)
-        g2.setLayout(f2); lo.addWidget(g2)
-        
-        
-
         
         g5 = QGroupBox('新闻监控API（可选）')
         f5 = QFormLayout()
@@ -340,8 +330,6 @@ class SettingsDialog(QDialog):
     def _load(self):
         self.wh_edit.setText(self.cfg.get('webhook_url',''))
         self.ch_combo.setCurrentIndex(0 if self.cfg.get('channel')=='dingtalk' else 1)
-        self.pc.setValue(self.cfg.get('price_change_threshold_pct',5.0))
-        self.vc.setValue(self.cfg.get('volume_change_threshold_pct',200.0))
         self.as_cb.setChecked(self.cfg.get('auto_start',True))
         self.proxy_edit.setText(self.cfg.get('proxy','http://127.0.0.1:7890'))
         self.secret_edit.setText(self.cfg.get('dingtalk_secret',''))
@@ -359,8 +347,6 @@ class SettingsDialog(QDialog):
     def _save(self):
         self.cfg['webhook_url']=self.wh_edit.text().strip()
         self.cfg['channel']='dingtalk' if self.ch_combo.currentIndex()==0 else 'feishu'
-        self.cfg['price_change_threshold_pct']=self.pc.value()
-        self.cfg['volume_change_threshold_pct']=self.vc.value()
         self.cfg['auto_start']=self.as_cb.isChecked()
         self.cfg['proxy']=self.proxy_edit.text().strip()
         self.cfg['dingtalk_secret']=self.secret_edit.text().strip()
@@ -1041,6 +1027,9 @@ class MainWindow(QMainWindow):
         self.check_btn.clicked.connect(self._run_check)
         bl.addWidget(self.check_btn)
         bl.addStretch()
+        filter_btn = QPushButton('筛选')
+        filter_btn.clicked.connect(self._show_filter)
+        bl.addWidget(filter_btn)
         news_btn = QPushButton('新闻监控')
         news_btn.clicked.connect(self._fetch_news)
         bl.addWidget(news_btn)
@@ -1050,6 +1039,73 @@ class MainWindow(QMainWindow):
         lo.addLayout(bl)
         self._apply_theme()
 
+    def _show_filter(self):
+        try:
+            from PySide6.QtWidgets import QDialog, QFormLayout, QDoubleSpinBox, QSpinBox, QDialogButtonBox, QVBoxLayout, QLabel
+            dlg = QDialog(self)
+            dlg.setWindowTitle("筛选参数")
+            dlg.setMinimumWidth(380)
+            lo = QVBoxLayout(dlg)
+            flo = QFormLayout()
+            cfg = get_config()
+            
+            pc = QDoubleSpinBox(); pc.setRange(0.5, 50); pc.setDecimals(1); pc.setSuffix("%")
+            pc.setValue(cfg.get("price_change_threshold_pct", 3.5))
+            flo.addRow("涨跌幅阈值:", pc)
+
+            vc = QDoubleSpinBox(); vc.setRange(10, 500); vc.setDecimals(0); vc.setSuffix("%")
+            vc.setValue(cfg.get("volume_change_threshold_pct", 100.0))
+            flo.addRow("成交量异动:", vc)
+
+            mv = QSpinBox(); mv.setRange(10000, 5000000); mv.setSingleStep(10000); mv.setSuffix(" USDT")
+            mv.setValue(cfg.get("min_volume_usdt", 500000))
+            flo.addRow("最低成交量:", mv)
+
+            mc = QSpinBox(); mc.setRange(1000000, 2000000000); mc.setSingleStep(1000000)
+            mc.setSuffix(" USD"); mc.setValue(cfg.get("max_market_cap", 400000000))
+            flo.addRow("市值上限:", mc)
+
+            tc = QSpinBox(); tc.setRange(50, 500); tc.setValue(cfg.get("top_coins_count", 200))
+            flo.addRow("拉取币数量:", tc)
+
+            da = QSpinBox(); da.setRange(3, 30); da.setValue(cfg.get("deep_analysis_count", 10))
+            flo.addRow("深度分析数量:", da)
+
+            fd = QSpinBox(); fd.setRange(5, 50); fd.setValue(cfg.get("feishu_display_count", 15))
+            flo.addRow("飞书展示数量:", fd)
+
+            bc = QDoubleSpinBox(); bc.setRange(0.1, 1.0); bc.setDecimals(2); bc.setSingleStep(0.05)
+            bc.setValue(cfg.get("btc_corr_filter", 0.7))
+            flo.addRow("BTC相关过滤:", bc)
+
+            ms = QSpinBox(); ms.setRange(-10, 10); ms.setValue(cfg.get("min_score_filter", 1))
+            flo.addRow("评分下限:", ms)
+
+            lo.addLayout(flo)
+            lo.addWidget(QLabel("修改后保存即生效"))
+            btn_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+            btn_box.accepted.connect(dlg.accept)
+            btn_box.rejected.connect(dlg.reject)
+            lo.addWidget(btn_box)
+
+            if dlg.exec() == QDialog.Accepted:
+                cfg["price_change_threshold_pct"] = pc.value()
+                cfg["volume_change_threshold_pct"] = vc.value()
+                cfg["min_volume_usdt"] = mv.value()
+                cfg["max_market_cap"] = mc.value()
+                cfg["top_coins_count"] = tc.value()
+                cfg["deep_analysis_count"] = da.value()
+                cfg["feishu_display_count"] = fd.value()
+                cfg["btc_corr_filter"] = bc.value()
+                cfg["min_score_filter"] = ms.value()
+                from config import save_config
+                save_config(cfg)
+                self._log("✅ 筛选参数已保存")
+        except Exception as e:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "错误", f"筛选窗口打开失败: {e}")
+            import traceback
+            traceback.print_exc()
     def _start_scheduler(self):
         self.scheduler = BackgroundScheduler()
         cfg = get_config()
@@ -1284,7 +1340,19 @@ class MainWindow(QMainWindow):
             tb.setOpenExternalLinks(False)
             tb.setHtml(html)
             lo.addWidget(tb)
-            dlg.exec()
+            if dlg.exec() == QDialog.Accepted:
+                cfg["price_change_threshold_pct"] = pc.value()
+                cfg["volume_change_threshold_pct"] = vc.value()
+                cfg["min_volume_usdt"] = mv.value()
+                cfg["max_market_cap"] = mc.value()
+                cfg["top_coins_count"] = tc.value()
+                cfg["deep_analysis_count"] = da.value()
+                cfg["feishu_display_count"] = fd.value()
+                cfg["btc_corr_filter"] = bc.value()
+                cfg["min_score_filter"] = ms.value()
+                from config import save_config
+                save_config(cfg)
+                self._log("\u2705 \u7b5b\u9009\u53c2\u6570\u5df2\u4fdd\u5b58\uff0c\u4e0b\u4e00\u8f6e\u751f\u6548")
             self._log(f'{sym} \u5206\u6790\u5b8c\u6210')
         except Exception as e:
             self._log(f'\u5206\u6790\u5931\u8d25: {e}')
@@ -1295,8 +1363,12 @@ class MainWindow(QMainWindow):
             try: self.scheduler.remove_job('c')
             except: pass
             cfg = get_config()
-            cpm = max(1, min(7, new_cfg.get('checks_per_minute', 4)))
+            cpm = max(1, min(7, cfg.get('checks_per_minute', 4)))
             self.scheduler.add_job(self._run_check,'interval',minutes=1/cpm,id='c')
+            # ????????
+            try: self.scheduler.remove_job('news')
+            except: pass
+            self.scheduler.add_job(self._fetch_news, 'interval', minutes=cfg.get('news_interval_minutes',10), id='news')
             # Rate limit check
             try:
                 import collector
