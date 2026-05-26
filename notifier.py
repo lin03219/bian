@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 推送模块：钉钉 / 飞书群机器人 Webhook
 """
@@ -64,7 +64,7 @@ def _check_accumulation(sig):
     if ls and "多" in ls:
         hints.append(ls); score += 1
     if score >= 3:
-        return " | 🏗建仓: " + "/".join(hints)
+        return " | [建仓]: " + "/".join(hints)
     return ""
 
 
@@ -403,17 +403,17 @@ class Notifier:
         try:
             proxy_url = cfg.get('proxy', '')
             proxies = {'http': proxy_url, 'https': proxy_url} if proxy_url else None
-            print(f"[FEISHU DEBUG] posting to feishu, md_content({len(md_content)} chars): {md_content[:100]}")
+            print(f"[FEISHU DEBUG] posting to feishu, md_content({len(md_content)} chars)")
             resp = requests.post(url, json=payload, timeout=15, proxies=proxies)
             result = resp.json()
             code = result.get('code')
             if code is None:
                 code = result.get('StatusCode')
             if code == 0:
-                print(f"[FEISHU] send OK")
+                print("[FEISHU] send OK")
                 return True, ''
             err = result.get("msg", result.get("StatusMessage", resp.text[:200]))
-            print(f"[FEISHU] send FAIL: {err}")
+            print(f"[FEISHU] send FAIL: {str(err)[:100]}")
             return False, err
 
         except Exception as e:

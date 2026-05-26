@@ -21,6 +21,7 @@ from detector import SignalDetector
 import sector
 import news_monitor
 from notifier import Notifier
+from feishu_listener import FeishuListener
 from config import get_config, save_config
 
 
@@ -1101,6 +1102,32 @@ class MainWindow(QMainWindow):
             self.setStyleSheet(dark)
         else:
             self.setStyleSheet("")
+
+    def _on_feishu_cmd(self, text, chat_id, chat_name):
+        cmd = text.strip().lower()
+        self._log(f"[飞书] {chat_name}: {text}")
+        reply = None
+        if cmd in ("暂停", "pause"):
+            self.paused = True; reply = "✅ 已暂停监控"
+        elif cmd in ("继续", "resume", "开始"):
+            self.paused = False; reply = "✅ 已继续监控"
+        elif cmd in ("立即检测", "check", "检测"):
+            self._run_check(); reply = "✅ 已触发立即检测"
+        elif cmd.startswith("拉黑") or cmd.startswith("block "):
+            coin = cmd.replace("拉黑", "").replace("block ", "").strip().upper()
+            if coin:
+                bl = self.cfg.get("blacklist", [])
+                if coin not in bl:
+                    bl.append(coin); self.cfg["blacklist"] = bl
+                    from config import save_config; save_config(self.cfg)
+                    reply = f"✅ 已拉黑 {coin}"
+        elif cmd in ("状态", "status"):
+            reply = f"状态: {'已暂停' if self.paused else '运行中'}"
+        if reply:
+            try:
+                self.feishu_listener.send_message(chat_id, reply)
+            except:
+                pass
 
     def _run_check(self):
         import time as _t
