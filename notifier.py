@@ -346,12 +346,42 @@ class Notifier:
             is_new = sig.get("is_new", False)
             dot_color = '#FF6600' if is_new else '#0066FF'
             new_tag = ' 🆕' if is_new else ''
-            entry_lines.append("<font color='{}'>\u25cf</font> **{} [{:+d}]** {}{}{}".format(dot_color, coin, score, summary, accu, new_tag))
+            event_tags = sig.get("event_tags", [])
+            et_str = " " + " ".join(event_tags) if event_tags else ""
+            entry_lines.append("<font color='{}'>\u25cf</font> **{} [{:+d}]** {}{}{}".format(dot_color, coin, score, summary, accu, new_tag, et_str))
             entry = chr(10).join(entry_lines)
 
 
             if score >= get_config().get('min_score_filter', 1):
                 all_signals.append((score, entry))
+        
+        # ?????? display_count??????
+        if len(all_signals) < display_count:
+            needed = display_count - len(all_signals)
+            extra = []
+            for sig in signals:
+                typ = sig.get('type', '')
+                if typ in ('market_overview', 'sector'):
+                    continue
+                if sig.get('btc_corr', 0) and sig['btc_corr'] > get_config().get('btc_corr_filter', 0.7):
+                    continue
+                coin = sig.get('coin', '')
+                score = sig.get('score', 0)
+                # ???????
+                already = any(coin == e[1].split('**')[1].split(' [')[0] if '**' in e[1] else False for e in all_signals)
+                if already:
+                    continue
+                if len(extra) >= needed:
+                    break
+                summary = _make_summary(score, sig.get('reasons_bull', []), sig.get('reasons_bear', []))
+                accu = _check_accumulation(sig)
+                is_new = sig.get("is_new", False)
+                dot_color = '#FF6600' if is_new else '#0066FF'
+                new_tag = ' 🆕' if is_new else ''
+                et_str = " " + " ".join(sig.get("event_tags", [])) if sig.get("event_tags") else ""
+                entry = "<font color='{}'>●</font> **{} [{:+d}]** {}{}{}{}".format(dot_color, coin, score, summary, accu, new_tag, et_str)
+                extra.append((score, entry))
+            all_signals.extend(extra)
         
         md_lines.append(f'> {overview}')
         md_lines.append('')

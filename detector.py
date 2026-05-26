@@ -19,6 +19,16 @@ class SignalDetector:
         signals += self.detect_volume_spike(coins)
         signals += self.detect_fear_greed_extreme(global_data)
         signals += self.detect_trending_newcomers(trending_coins)
+        # ???????? change_pct ????????
+        seen = {}
+        for s in signals:
+            coin = s.get('coin', '')
+            if coin in seen:
+                if abs(s.get('change_pct', 0)) > abs(seen[coin].get('change_pct', 0)):
+                    seen[coin] = s
+            else:
+                seen[coin] = s
+        signals = list(seen.values())
         self._update_history(coins)
         return signals
 

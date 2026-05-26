@@ -170,6 +170,12 @@ class MonitorWorker(QThread):
                     s['btc_corr'] = corr
                 except:
                     pass
+                    # ???????????
+                    try:
+                        import announcement
+                        announcement.get_announcement_tags(signals)
+                    except:
+                        pass
                 # Orderbook 500??? (25wgt) -- ??????
                 try:
                     ratio, ob_label, cum_imb, wall_score = collector.get_orderbook_100(sym)
@@ -1043,11 +1049,22 @@ class MainWindow(QMainWindow):
         try:
             from PySide6.QtWidgets import QDialog, QFormLayout, QDoubleSpinBox, QSpinBox, QDialogButtonBox, QVBoxLayout, QLabel
             dlg = QDialog(self)
-            dlg.setWindowTitle("筛选参数")
             dlg.setMinimumWidth(380)
             lo = QVBoxLayout(dlg)
             flo = QFormLayout()
             cfg = get_config()
+            
+            # wgt????
+            wgt_lbl = QLabel()
+            wgt_lbl.setStyleSheet("color:#e67e22;font-weight:bold;font-size:11px;")
+            
+            def _calc_wgt():
+                n = tc.value()
+                d = da.value()
+                est_sigs = max(1, int(n * 0.12))
+                wgt = 56 + est_sigs * 2 + d * 16
+                wgt_lbl.setText("预估 " + str(wgt) + " wgt/轮")
+                dlg.setWindowTitle("筛选参数 [预估 " + str(wgt) + " wgt/轮]")
             
             pc = QDoubleSpinBox(); pc.setRange(0.5, 50); pc.setDecimals(1); pc.setSuffix("%")
             pc.setValue(cfg.get("price_change_threshold_pct", 3.5))
@@ -1066,9 +1083,11 @@ class MainWindow(QMainWindow):
             flo.addRow("市值上限:", mc)
 
             tc = QSpinBox(); tc.setRange(50, 500); tc.setValue(cfg.get("top_coins_count", 200))
+            tc.valueChanged.connect(lambda v: _calc_wgt())
             flo.addRow("拉取币数量:", tc)
 
             da = QSpinBox(); da.setRange(3, 30); da.setValue(cfg.get("deep_analysis_count", 10))
+            da.valueChanged.connect(lambda v: _calc_wgt())
             flo.addRow("深度分析数量:", da)
 
             fd = QSpinBox(); fd.setRange(5, 50); fd.setValue(cfg.get("feishu_display_count", 15))
@@ -1082,11 +1101,14 @@ class MainWindow(QMainWindow):
             flo.addRow("评分下限:", ms)
 
             lo.addLayout(flo)
+            lo.addWidget(wgt_lbl)
             lo.addWidget(QLabel("修改后保存即生效"))
             btn_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
             btn_box.accepted.connect(dlg.accept)
             btn_box.rejected.connect(dlg.reject)
             lo.addWidget(btn_box)
+            
+            _calc_wgt()
 
             if dlg.exec() == QDialog.Accepted:
                 cfg["price_change_threshold_pct"] = pc.value()
@@ -1106,6 +1128,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "错误", f"筛选窗口打开失败: {e}")
             import traceback
             traceback.print_exc()
+
     def _start_scheduler(self):
         self.scheduler = BackgroundScheduler()
         cfg = get_config()
