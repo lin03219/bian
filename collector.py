@@ -496,7 +496,7 @@ def get_market_caps():
             for c in resp.json():
                 sym = c.get('symbol', '').upper()
                 mcap = c.get('market_cap', 0) or 0
-                if sym and mcap > 0:
+                if sym and mcap >= 0:
                     result[sym] = mcap
         _market_caps_cache = result
         _market_caps_time = now

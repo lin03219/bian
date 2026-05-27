@@ -371,6 +371,8 @@ class Notifier:
                 already = any(coin == e[1].split('**')[1].split(' [')[0] if '**' in e[1] else False for e in all_signals)
                 if already:
                     continue
+                if score < get_config().get('min_score_filter', 1):
+                    continue
                 if len(extra) >= needed:
                     break
                 summary = _make_summary(score, sig.get('reasons_bull', []), sig.get('reasons_bear', []))
