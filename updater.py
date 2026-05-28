@@ -5,7 +5,7 @@ from pathlib import Path
 import requests
 
 GITHUB_REPO = "lin03219/bian"
-CURRENT_VERSION = "1.4.1"
+CURRENT_VERSION = "1.4.2"
 VERSION_FILE = Path(os.path.expanduser("~")) / ".crypto_monitor" / "version.txt"
 
 def get_current_version():
@@ -27,23 +27,26 @@ def _get_proxy():
 
 def check_update():
     """Returns (has_update, latest_version, download_url, body) or None on error"""
-    try:
-        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-        resp = requests.get(url, timeout=10, headers={"Accept": "application/vnd.github.v3+json"}, proxies=_get_proxy())
-        if resp.status_code != 200:
-            print(f'[UPDATER] API returned {resp.status_code}')
-            return None
-        data = resp.json()
-        latest = data["tag_name"].lstrip("v")
-        current = get_current_version()
-        if latest != current:
-            # Find the .exe asset
-            for asset in data.get("assets", []):
-                if asset["name"].endswith(".exe"):
-                    return True, latest, asset["browser_download_url"], data.get("body", "")
-        return False, latest, "", ""
-    except Exception:
-        return None
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+    headers = {"Accept": "application/vnd.github.v3+json"}
+    
+    # Try with proxy first, then without
+    for proxy in [_get_proxy(), None]:
+        try:
+            resp = requests.get(url, timeout=10, headers=headers, proxies=proxy)
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            latest = data["tag_name"].lstrip("v")
+            current = get_current_version()
+            if latest != current:
+                for asset in data.get("assets", []):
+                    if asset["name"].endswith(".exe"):
+                        return True, latest, asset["browser_download_url"], data.get("body", "")
+            return False, latest, "", ""
+        except Exception:
+            continue
+    return None
 
 def download_and_replace(download_url, callback=None):
     """Download new exe to temp, then replace current exe."""
