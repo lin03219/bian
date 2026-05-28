@@ -5,7 +5,7 @@ from pathlib import Path
 import requests
 
 GITHUB_REPO = "lin03219/bian"
-CURRENT_VERSION = "1.4.2"
+CURRENT_VERSION = "1.4.3"
 VERSION_FILE = Path(os.path.expanduser("~")) / ".crypto_monitor" / "version.txt"
 
 def get_current_version():

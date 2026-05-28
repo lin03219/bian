@@ -1298,6 +1298,7 @@ class MainWindow(QMainWindow):
             pass
         ok, err = updater.download_and_replace(self._update_url, _cb)
         if ok:
+            updater.save_version(self._update_version)
             self.update_lbl.setText('更新完成,请重启')
             self.update_lbl.setStyleSheet('color:#fff;background:#27ae60;border-radius:3px;padding:2px 8px;font-size:11px;font-weight:bold')
             QMessageBox.information(self, '更新完成', '新版本已下载，请手动重启软件。')
